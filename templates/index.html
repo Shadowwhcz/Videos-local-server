@@ -2,30 +2,34 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#1a1a2e">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0f0f1a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>局域网视频服务器</title>
+    <title>本地视频库</title>
+    
+    <!-- Preconnect for faster loading -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
     
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Bootstrap Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css" rel="stylesheet">
-    <!-- 自定义样式 -->
+    <!-- Custom styles -->
     <link href="/static/style.css" rel="stylesheet">
+    
     <!-- Particles.js -->
-    <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js" defer></script>
 </head>
 <body>
-    <!-- 粒子背景 -->
+    <!-- Particle Background -->
     <div id="particles-js"></div>
     
-    <!-- 导航栏 -->
-    <nav class="navbar navbar-expand-lg sticky-top">
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg">
         <div class="container">
             <a class="navbar-brand" href="/">
-                <i class="bi bi-play-circle-fill me-2"></i>
+                <i class="bi bi-play-circle-fill"></i>
                 <span>本地视频库</span>
             </a>
             
@@ -56,11 +60,12 @@
     </nav>
     
     <main class="container py-4">
-        <!-- 目录选择器（首页显示） -->
+        <!-- Directory Selector (Home Page) -->
         {% if directories and not browse_result and not search %}
         <div class="directory-section">
             <h5 class="section-title">
-                <i class="bi bi-folder2-open me-2"></i>选择视频目录
+                <i class="bi bi-folder2-open"></i>
+                <span>选择视频目录</span>
             </h5>
             <div class="directory-grid">
                 {% for dir in directories %}
@@ -81,11 +86,12 @@
         <hr class="section-divider">
         
         <h5 class="section-title">
-            <i class="bi bi-clock-history me-2"></i>最近视频
+            <i class="bi bi-clock-history"></i>
+            <span>最近视频</span>
         </h5>
         {% endif %}
         
-        <!-- 目录导航面包屑（浏览目录时显示） -->
+        <!-- Breadcrumb Navigation -->
         {% if browse_result %}
         <div class="breadcrumb-nav">
             <a href="/" class="breadcrumb-item">
@@ -110,7 +116,7 @@
             {% endif %}
         </div>
         
-        <!-- 返回上级按钮 -->
+        <!-- Back Button -->
         {% if browse_result.parent_path != None %}
         <a href="/?browse={{ current_browse | urlencode }}{% if browse_result.parent_path %}&dir_path={{ browse_result.parent_path | urlencode }}{% endif %}" 
            class="back-folder-btn">
@@ -119,7 +125,7 @@
         </a>
         {% endif %}
         
-        <!-- 文件夹列表 -->
+        <!-- Folder List -->
         {% if browse_result.folders %}
         <div class="folder-section">
             <div class="folder-grid">
@@ -135,7 +141,7 @@
         {% endif %}
         {% endif %}
         
-        <!-- 统计信息 -->
+        <!-- Stats Bar -->
         {% if videos %}
         <div class="stats-bar">
             <div class="stat-item">
@@ -149,7 +155,7 @@
         </div>
         {% endif %}
         
-        <!-- 视频网格 -->
+        <!-- Video Grid -->
         {% if videos %}
         <div class="video-grid" data-preview-enabled="true">
             {% for video in videos %}
@@ -186,7 +192,7 @@
             {% endfor %}
         </div>
         
-        <!-- 浏览目录时的视频列表 -->
+        <!-- Browse Result Videos -->
         {% elif browse_result and browse_result.videos %}
         <div class="video-grid" data-preview-enabled="true">
             {% for video in browse_result.videos %}
@@ -223,24 +229,24 @@
             {% endfor %}
         </div>
         
+        <!-- Empty Directory -->
         {% elif browse_result and not browse_result.videos and not browse_result.folders %}
-        <!-- 空目录 -->
         <div class="empty-state">
             <i class="bi bi-folder-x"></i>
             <h3>此目录为空</h3>
             <p>该目录中没有视频文件</p>
         </div>
         
+        <!-- No Directories Configured -->
         {% elif not search and not browse_result and not directories %}
-        <!-- 未配置目录 -->
         <div class="empty-state">
             <i class="bi bi-gear"></i>
             <h3>未配置视频目录</h3>
             <p>请检查 config.ini 中的配置</p>
         </div>
         
+        <!-- No Search Results -->
         {% elif search and not videos %}
-        <!-- 搜索无结果 -->
         <div class="empty-state">
             <i class="bi bi-search"></i>
             <h3>没有找到匹配的视频</h3>
@@ -249,7 +255,7 @@
         
         {% endif %}
         
-        <!-- 分页 -->
+        <!-- Pagination -->
         {% if total_pages and total_pages > 1 %}
         <nav class="pagination-wrapper">
             <ul class="pagination">
@@ -297,98 +303,100 @@
         {% endif %}
     </main>
     
-    <!-- 页脚 -->
-    <footer class="text-center py-4 text-white-50">
+    <!-- Footer -->
+    <footer>
         <small>局域网视频服务器 · 支持多种视频格式 · 悬停预览</small>
     </footer>
     
     <!-- Bootstrap 5 JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Custom JS -->
     <script src="/static/app.js"></script>
+    <!-- Particles Configuration -->
     <script>
-        // 粒子背景配置
-        particlesJS('particles-js', {
-            particles: {
-                number: {
-                    value: 50,
-                    density: {
-                        enable: true,
-                        value_area: 1000
-                    }
-                },
-                color: {
-                    value: ['#667eea', '#764ba2', '#9f7aea', '#a78bfa']
-                },
-                shape: {
-                    type: 'circle'
-                },
-                opacity: {
-                    value: 0.3,
-                    random: true,
-                    anim: {
-                        enable: true,
-                        speed: 0.5,
-                        opacity_min: 0.1,
-                        sync: false
-                    }
-                },
-                size: {
-                    value: 3,
-                    random: true,
-                    anim: {
-                        enable: true,
-                        speed: 2,
-                        size_min: 0.5,
-                        sync: false
-                    }
-                },
-                line_linked: {
-                    enable: true,
-                    distance: 150,
-                    color: '#667eea',
-                    opacity: 0.15,
-                    width: 1
-                },
-                move: {
-                    enable: true,
-                    speed: 1,
-                    direction: 'none',
-                    random: true,
-                    straight: false,
-                    out_mode: 'out',
-                    bounce: false,
-                    attract: {
-                        enable: false
-                    }
-                }
-            },
-            interactivity: {
-                detect_on: 'canvas',
-                events: {
-                    onhover: {
-                        enable: true,
-                        mode: 'grab'
-                    },
-                    onclick: {
-                        enable: true,
-                        mode: 'push'
-                    },
-                    resize: true
-                },
-                modes: {
-                    grab: {
-                        distance: 140,
-                        line_linked: {
-                            opacity: 0.4
+    document.addEventListener('DOMContentLoaded', function() {
+        if (typeof particlesJS !== 'undefined') {
+            particlesJS('particles-js', {
+                particles: {
+                    number: {
+                        value: window.innerWidth < 768 ? 30 : 60,
+                        density: {
+                            enable: true,
+                            value_area: 1200
                         }
                     },
-                    push: {
-                        particles_nb: 3
+                    color: {
+                        value: ['#667eea', '#764ba2', '#a78bfa', '#818cf8']
+                    },
+                    shape: {
+                        type: 'circle'
+                    },
+                    opacity: {
+                        value: 0.25,
+                        random: true,
+                        anim: {
+                            enable: true,
+                            speed: 0.4,
+                            opacity_min: 0.08,
+                            sync: false
+                        }
+                    },
+                    size: {
+                        value: 3,
+                        random: true,
+                        anim: {
+                            enable: true,
+                            speed: 2,
+                            size_min: 0.5,
+                            sync: false
+                        }
+                    },
+                    line_linked: {
+                        enable: true,
+                        distance: 150,
+                        color: '#667eea',
+                        opacity: 0.12,
+                        width: 1
+                    },
+                    move: {
+                        enable: true,
+                        speed: 0.6,
+                        direction: 'none',
+                        random: true,
+                        straight: false,
+                        out_mode: 'out',
+                        bounce: false
                     }
-                }
-            },
-            retina_detect: true
-        });
+                },
+                interactivity: {
+                    detect_on: 'canvas',
+                    events: {
+                        onhover: {
+                            enable: window.innerWidth > 768,
+                            mode: 'grab'
+                        },
+                        onclick: {
+                            enable: true,
+                            mode: 'push'
+                        },
+                        resize: true
+                    },
+                    modes: {
+                        grab: {
+                            distance: 140,
+                            line_linked: {
+                                opacity: 0.35
+                            }
+                        },
+                        push: {
+                            particles_nb: 3
+                        }
+                    }
+                },
+                retina_detect: true
+            });
+        }
+    });
     </script>
 </body>
 </html>
