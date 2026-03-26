@@ -38,6 +38,11 @@ app.add_middleware(
 # 获取项目根目录
 BASE_DIR = Path(__file__).resolve().parent
 
+
+def get_video_id(video_path: str) -> str:
+    """生成确定性的视频ID（使用MD5，跨进程一致）"""
+    return hashlib.md5(video_path.encode('utf-8')).hexdigest()[:16]
+
 # 缩略图缓存目录
 THUMBNAIL_DIR = BASE_DIR / "thumbnails"
 THUMBNAIL_DIR.mkdir(exist_ok=True)
@@ -247,8 +252,8 @@ class VideoServer:
         """根据视频ID获取路径"""
         videos = self.scan_videos()
         for v in videos:
-            # 使用文件路径的hash作为ID
-            if str(hash(v['path'])) == video_id:
+            # 使用确定性的ID匹配
+            if get_video_id(v['path']) == video_id:
                 return v['path']
         return None
     
@@ -433,7 +438,7 @@ async def index(
         
         # 为视频生成ID
         for v in browse_result['videos']:
-            v['id'] = str(hash(v['path']))
+            v['id'] = get_video_id(v['path'])
         
         return templates.TemplateResponse(
             "index.html",
@@ -462,7 +467,7 @@ async def index(
     
     # 为每个视频生成ID
     for v in videos:
-        v['id'] = str(hash(v['path']))
+        v['id'] = get_video_id(v['path'])
     
     return templates.TemplateResponse(
         "index.html",
@@ -488,7 +493,7 @@ async def play(request: Request, video_id: str):
     videos = video_server.scan_videos()
     video = None
     for v in videos:
-        if str(hash(v['path'])) == video_id:
+        if get_video_id(v['path']) == video_id:
             video = v
             break
     
@@ -506,9 +511,72 @@ async def play(request: Request, video_id: str):
     )
 
 
-@app.get("/stream/{video_id}")
+def generate_etag(file_path: str) -> str:
+    """生成文件ETag（基于修改时间和大小）"""
+    stat = os.stat(file_path)
+    return f'"{stat.st_mtime}-{stat.st_size}"'
+
+
+def parse_range_header(range_header: str, file_size: int) -> list[tuple[int, int]]:
+    """
+    解析Range请求头，返回(start, end)元组列表
+    支持格式: bytes=0-499, bytes=500-, bytes=-500
+    """
+    ranges = []
+    
+    if not range_header or not range_header.startswith('bytes='):
+        return ranges
+    
+    range_spec = range_header[6:]  # 去掉 'bytes='
+    
+    for part in range_spec.split(','):
+        part = part.strip()
+        if '-' not in part:
+            continue
+        
+        start_str, end_str = part.split('-', 1)
+        start_str = start_str.strip()
+        end_str = end_str.strip()
+        
+        try:
+            if start_str and end_str:
+                # bytes=0-499
+                start = int(start_str)
+                end = int(end_str)
+            elif start_str:
+                # bytes=500- (从start到文件末尾)
+                start = int(start_str)
+                end = file_size - 1
+            elif end_str:
+                # bytes=-500 (最后500字节)
+                start = max(0, file_size - int(end_str))
+                end = file_size - 1
+            else:
+                continue
+            
+            # 验证范围
+            if start < 0 or end < start or start >= file_size:
+                continue
+            
+            # 限制end不超过文件大小
+            end = min(end, file_size - 1)
+            ranges.append((start, end))
+        except ValueError:
+            continue
+    
+    return ranges
+
+
+@app.api_route("/stream/{video_id}", methods=["GET", "HEAD"])
 async def stream_video(video_id: str, request: Request):
-    """视频流传输（支持Range请求）"""
+    """
+    视频流传输（完整支持HTTP Range请求）
+    支持:
+    - Range请求 (206 Partial Content)
+    - If-Range条件请求
+    - ETag缓存验证
+    - 多Range请求（返回第一个有效范围）
+    """
     # 认证检查
     if video_server.auth_enabled and not get_current_user(request):
         raise HTTPException(status_code=401, detail="未登录")
@@ -517,7 +585,7 @@ async def stream_video(video_id: str, request: Request):
     video_path = None
     
     for v in videos:
-        if str(hash(v['path'])) == video_id:
+        if get_video_id(v['path']) == video_id:
             video_path = v['path']
             break
     
@@ -526,28 +594,61 @@ async def stream_video(video_id: str, request: Request):
     
     file_size = os.path.getsize(video_path)
     mime_type = get_mime_type(video_path)
+    etag = generate_etag(video_path)
     
-    # 处理Range请求
+    # 基础响应头
+    base_headers = {
+        'Accept-Ranges': 'bytes',
+        'Content-Type': mime_type,
+        'ETag': etag,
+        'Cache-Control': 'public, max-age=31536000',  # 缓存1年
+    }
+    
+    # HEAD请求只返回头信息
+    if request.method == 'HEAD':
+        return Response(
+            status_code=200,
+            headers={**base_headers, 'Content-Length': str(file_size)},
+        )
+    
+    # 检查If-Range条件
     range_header = request.headers.get('range')
+    if_range = request.headers.get('if-range')
     
     if range_header:
-        # 解析Range头
-        range_match = range_header.replace('bytes=', '').split('-')
-        start = int(range_match[0]) if range_match[0] else 0
-        end = int(range_match[1]) if range_match[1] else file_size - 1
+        # 如果有If-Range头，需要验证条件
+        if if_range:
+            # If-Range可以是ETag或日期
+            # ETag格式需要完全匹配（包含引号）
+            if if_range.strip('"') != etag.strip('"'):
+                # 条件不满足，返回完整文件
+                range_header = None
+    
+    if range_header:
+        # 解析Range请求
+        ranges = parse_range_header(range_header, file_size)
         
-        # 确保范围有效
-        if start >= file_size:
-            raise HTTPException(status_code=416, detail="Range not satisfiable")
+        if not ranges:
+            # 无效的Range请求
+            return Response(
+                status_code=416,
+                headers={
+                    'Content-Range': f'bytes */{file_size}',
+                    'Accept-Ranges': 'bytes',
+                },
+            )
         
-        end = min(end, file_size - 1)
+        # 只处理第一个Range（浏览器通常只发一个）
+        start, end = ranges[0]
         content_length = end - start + 1
+        
+        # 使用更优化的块大小（1MB适合视频流）
+        chunk_size = 1024 * 1024
         
         def iterfile():
             with open(video_path, 'rb') as f:
                 f.seek(start)
                 remaining = content_length
-                chunk_size = 64 * 1024  # 64KB chunks
                 while remaining > 0:
                     read_size = min(chunk_size, remaining)
                     data = f.read(read_size)
@@ -557,30 +658,30 @@ async def stream_video(video_id: str, request: Request):
                     yield data
         
         headers = {
+            **base_headers,
             'Content-Range': f'bytes {start}-{end}/{file_size}',
-            'Accept-Ranges': 'bytes',
             'Content-Length': str(content_length),
-            'Content-Type': mime_type,
         }
         
         return StreamingResponse(
             iterfile(),
             status_code=206,
             headers=headers,
-            media_type=mime_type,
         )
     else:
         # 无Range请求，返回完整文件
+        chunk_size = 1024 * 1024  # 1MB chunks
+        
         def iterfile():
             with open(video_path, 'rb') as f:
-                while chunk := f.read(64 * 1024):
+                while chunk := f.read(chunk_size):
                     yield chunk
         
         return StreamingResponse(
             iterfile(),
             media_type=mime_type,
             headers={
-                'Accept-Ranges': 'bytes',
+                **base_headers,
                 'Content-Length': str(file_size),
             }
         )
@@ -591,7 +692,7 @@ async def api_videos(search: str = "", directory: str = None):
     """API: 获取视频列表"""
     videos = video_server.scan_videos(search, directory)
     for v in videos:
-        v['id'] = str(hash(v['path']))
+        v['id'] = get_video_id(v['path'])
     return {"videos": videos, "total": len(videos)}
 
 
