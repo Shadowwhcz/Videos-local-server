@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <title>{{ video.name }} - 本地视频库</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css" rel="stylesheet">
+    <!-- 自定义样式 -->
+    <link href="/static/style.css" rel="stylesheet">
+    
+    <style>
+        /* 播放页面特定样式 */
+        .player-wrapper {
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+        }
+        
+        .player-wrapper video {
+            width: 100%;
+            display: block;
+            background: #000;
+            max-height: 80vh;
+        }
+        
+        /* 移动端播放器优化 */
+        @media (max-width: 768px) {
+            .player-wrapper video {
+                max-height: 70vh;
+            }
+            
+            .video-panel h1 {
+                font-size: 1.1rem;
+                word-break: break-all;
+            }
+            
+            .shortcuts {
+                display: none;  /* 移动端隐藏快捷键提示 */
+            }
+        }
+        
+        /* 视频控制栏美化 */
+        video::-webkit-media-controls-panel {
+            background: linear-gradient(transparent, rgba(0,0,0,0.8));
+        }
+    </style>
+</head>
+<body>
+    <main class="player-container py-3">
+        <!-- 返回按钮 -->
+        <a href="/" class="back-btn">
+            <i class="bi bi-arrow-left"></i>
+            <span>返回列表</span>
+        </a>
+        
+        <!-- 视频播放器 -->
+        <div class="player-wrapper">
+            <video id="videoPlayer" 
+                   data-video-id="{{ video.id }}"
+                   controls 
+                   autoplay 
+                   playsinline
+                   preload="metadata"
+                   poster="/static/poster.png">
+                <source src="/stream/{{ video.id }}" type="video/{{ video.ext|lower }}">
+                您的浏览器不支持视频播放，请使用现代浏览器。
+            </video>
+        </div>
+        
+        <!-- 视频信息 -->
+        <div class="video-panel">
+            <h1>{{ video.name }}</h1>
+            <div class="video-details">
+                <div class="detail-item">
+                    <i class="bi bi-file-earmark-play"></i>
+                    <span>格式: <span class="value">{{ video.ext }}</span></span>
+                </div>
+                <div class="detail-item">
+                    <i class="bi bi-hdd"></i>
+                    <span>大小: <span class="value">{{ video.size_mb }} MB</span></span>
+                </div>
+                <div class="detail-item">
+                    <i class="bi bi-calendar3"></i>
+                    <span>修改: <span class="value">{{ video.modified }}</span></span>
+                </div>
+                <div class="detail-item">
+                    <i class="bi bi-folder2-open"></i>
+                    <span>路径: <span class="value" style="word-break: break-all;">{{ video.rel_path }}</span></span>
+                </div>
+            </div>
+            
+            <!-- 快捷键提示 -->
+            <div class="shortcuts">
+                <h5><i class="bi bi-keyboard me-2"></i>键盘快捷键</h5>
+                <div class="shortcuts-list">
+                    <div class="shortcut">
+                        <kbd>Space</kbd>
+                        <span>暂停/播放</span>
+                    </div>
+                    <div class="shortcut">
+                        <kbd>←</kbd><kbd>→</kbd>
+                        <span>快退/快进 5秒</span>
+                    </div>
+                    <div class="shortcut">
+                        <kbd>↑</kbd><kbd>↓</kbd>
+                        <span>音量调节</span>
+                    </div>
+                    <div class="shortcut">
+                        <kbd>F</kbd>
+                        <span>全屏</span>
+                    </div>
+                    <div class="shortcut">
+                        <kbd>M</kbd>
+                        <span>静音</span>
+                    </div>
+                    <div class="shortcut">
+                        <kbd>Esc</kbd>
+                        <span>退出全屏</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <!-- Bootstrap 5 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>
