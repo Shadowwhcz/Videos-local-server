@@ -11,17 +11,69 @@ let appConfig = {
 let pendingVideos = [];
 let pollInterval = null;
 
+// ==================== 性能优化配置 ====================
+const BATCH_DELAY = 100;        // 批量请求延迟(ms)
+const MAX_CONCURRENT = 3;       // 最大并发请求数
+const STATUS_BATCH_SIZE = 20;   // 状态检查批量大小
+const DURATION_BATCH_SIZE = 10; // 时长获取批量大小
+
+// 请求队列管理
+class RequestQueue {
+    constructor(maxConcurrent = MAX_CONCURRENT) {
+        this.maxConcurrent = maxConcurrent;
+        this.running = 0;
+        this.queue = [];
+    }
+    
+    async add(fn) {
+        return new Promise((resolve, reject) => {
+            this.queue.push({ fn, resolve, reject });
+            this.process();
+        });
+    }
+    
+    async process() {
+        while (this.queue.length > 0 && this.running < this.maxConcurrent) {
+            this.running++;
+            const { fn, resolve, reject } = this.queue.shift();
+            try {
+                const result = await fn();
+                resolve(result);
+            } catch (err) {
+                reject(err);
+            } finally {
+                this.running--;
+                this.process();
+            }
+        }
+    }
+}
+
+const requestQueue = new RequestQueue();
+
 document.addEventListener('DOMContentLoaded', function() {
-    // 初始化所有功能
+    // 初始化所有功能（分批加载，减少并发）
     initConfig().then(() => {
         initSearch();
         initVideoCards();
         initThumbnails();
-        initVideoPreview();
-        initVideoDurations();
         initPlayer();
         initDeleteButtons();
-        initAutoIntegrityCheck();
+        
+        // 延迟加载非关键功能
+        setTimeout(() => {
+            initVideoPreview();
+        }, 500);
+        
+        // 进一步延迟加载状态检查
+        setTimeout(() => {
+            initAutoIntegrityCheck();
+        }, 1000);
+        
+        // 最后加载时长信息
+        setTimeout(() => {
+            initVideoDurations();
+        }, 1500);
     });
 });
 
@@ -229,11 +281,14 @@ function initVideoPreview() {
 }
 
 /**
- * 获取视频时长
+ * 获取视频时长（批量优化版）
  */
 function initVideoDurations() {
     const durationElements = document.querySelectorAll('.video-duration');
+    if (durationElements.length === 0) return;
     
+    // 收集需要获取时长的视频
+    const toFetch = [];
     durationElements.forEach(el => {
         const videoId = el.dataset.videoId;
         if (!videoId) return;
@@ -247,18 +302,39 @@ function initVideoDurations() {
             return;
         }
         
-        // 异步获取时长
-        fetchVideoInfo(videoId).then(info => {
-            if (info.duration_formatted) {
-                updateDurationDisplay(el, info.duration_formatted);
-                // 缓存1小时
-                localStorage.setItem(cacheKey, info.duration_formatted);
-                localStorage.setItem(`${cacheKey}_time`, Date.now().toString());
-            }
-        }).catch(() => {
-            // 静默失败
-        });
+        toFetch.push({ el, videoId });
     });
+    
+    if (toFetch.length === 0) return;
+    
+    // 分批获取时长
+    (async () => {
+        const batches = [];
+        for (let i = 0; i < toFetch.length; i += DURATION_BATCH_SIZE) {
+            batches.push(toFetch.slice(i, i + DURATION_BATCH_SIZE));
+        }
+        
+        for (const batch of batches) {
+            await Promise.all(batch.map(async ({ el, videoId }) => {
+                try {
+                    const info = await requestQueue.add(() => fetchVideoInfo(videoId));
+                    if (info.duration_formatted) {
+                        updateDurationDisplay(el, info.duration_formatted);
+                        // 缓存1小时
+                        localStorage.setItem(`video_duration_${videoId}`, info.duration_formatted);
+                        localStorage.setItem(`video_duration_${videoId}_time`, Date.now().toString());
+                    }
+                } catch (err) {
+                    // 静默失败
+                }
+            }));
+            
+            // 批次间延迟
+            if (batches.indexOf(batch) < batches.length - 1) {
+                await new Promise(r => setTimeout(r, BATCH_DELAY));
+            }
+        }
+    })();
 }
 
 /**
@@ -752,16 +828,21 @@ function closeModal(modal) {
 
 /**
  * 初始化自动完整性检查
+ * 优化：减少批量大小，延迟执行
  */
 function initAutoIntegrityCheck() {
     const videoWrappers = document.querySelectorAll('.video-card-wrapper');
     if (videoWrappers.length === 0) return;
     
-    // 收集所有视频ID
+    // 收集所有视频ID（限制最大数量，避免页面加载时过多请求）
     const videoIds = [];
-    videoWrappers.forEach(wrapper => {
+    const MAX_INITIAL_CHECK = 50; // 初始最多检查50个视频
+    
+    videoWrappers.forEach((wrapper, index) => {
         const videoId = wrapper.dataset.videoId;
-        if (videoId) videoIds.push(videoId);
+        if (videoId && index < MAX_INITIAL_CHECK) {
+            videoIds.push(videoId);
+        }
     });
     
     if (videoIds.length === 0) return;
@@ -775,29 +856,43 @@ function initAutoIntegrityCheck() {
 
 /**
  * 批量检查视频状态（下载中/损坏/正常）
+ * 优化：分批请求，避免一次性请求过多
  */
 async function batchCheckVideoStatus(videoIds) {
-    try {
-        const response = await fetch('/api/videos/status/batch', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ video_ids: videoIds })
-        });
-        
-        if (!response.ok) return;
-        
-        const data = await response.json();
-        
-        if (data.results) {
-            Object.entries(data.results).forEach(([videoId, result]) => {
-                updateVideoCardStatus(videoId, result);
-            });
+    // 分批处理，每批 STATUS_BATCH_SIZE 个
+    const batches = [];
+    for (let i = 0; i < videoIds.length; i += STATUS_BATCH_SIZE) {
+        batches.push(videoIds.slice(i, i + STATUS_BATCH_SIZE));
+    }
+    
+    // 串行处理每批请求
+    for (const batch of batches) {
+        try {
+            const response = await requestQueue.add(() => 
+                fetch('/api/videos/status/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ video_ids: batch })
+                })
+            );
+            
+            if (!response.ok) continue;
+            
+            const data = await response.json();
+            
+            if (data.results) {
+                Object.entries(data.results).forEach(([videoId, result]) => {
+                    updateVideoCardStatus(videoId, result);
+                });
+            }
+        } catch (err) {
+            console.log('状态检查失败:', err);
         }
         
-    } catch (err) {
-        console.log('状态检查失败:', err);
+        // 批次间短暂延迟，避免IO过载
+        if (batches.indexOf(batch) < batches.length - 1) {
+            await new Promise(r => setTimeout(r, BATCH_DELAY));
+        }
     }
 }
 
@@ -882,36 +977,53 @@ function showCorruptedPlaceholder(wrapper, reason) {
 
 /**
  * 批量检查视频完整性
+ * 优化：分批请求，使用请求队列
  */
 async function batchCheckIntegrity(videoIds) {
-    try {
-        const response = await fetch('/api/videos/integrity/batch', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ video_ids: videoIds })
-        });
-        
-        if (!response.ok) return;
-        
-        const data = await response.json();
-        
-        // 更新已缓存的结果
-        if (data.results) {
-            Object.entries(data.results).forEach(([videoId, result]) => {
-                updateVideoCard(videoId, result);
-            });
+    // 分批处理
+    const batches = [];
+    for (let i = 0; i < videoIds.length; i += STATUS_BATCH_SIZE) {
+        batches.push(videoIds.slice(i, i + STATUS_BATCH_SIZE));
+    }
+    
+    for (const batch of batches) {
+        try {
+            const response = await requestQueue.add(() =>
+                fetch('/api/videos/integrity/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ video_ids: batch })
+                })
+            );
+            
+            if (!response.ok) continue;
+            
+            const data = await response.json();
+            
+            // 更新已缓存的结果
+            if (data.results) {
+                Object.entries(data.results).forEach(([videoId, result]) => {
+                    updateVideoCard(videoId, result);
+                });
+            }
+            
+            // 如果有待检查的视频，启动轮询
+            if (data.pending && data.pending.length > 0) {
+                pendingVideos = [...pendingVideos, ...data.pending];
+            }
+        } catch (err) {
+            console.log('完整性检查失败:', err);
         }
         
-        // 如果有待检查的视频，启动轮询
-        if (data.pending && data.pending.length > 0) {
-            pendingVideos = data.pending;
-            startPolling();
+        // 批次间延迟
+        if (batches.indexOf(batch) < batches.length - 1) {
+            await new Promise(r => setTimeout(r, BATCH_DELAY));
         }
-        
-    } catch (err) {
-        console.log('完整性检查失败:', err);
+    }
+    
+    // 启动轮询（如果有待检查的视频）
+    if (pendingVideos.length > 0) {
+        startPolling();
     }
 }
 
@@ -928,7 +1040,9 @@ function startPolling() {
         }
         
         try {
-            const response = await fetch(`/api/videos/integrity/status?video_ids=${pendingVideos.join(',')}`);
+            // 只轮询前20个待检查的视频
+            const toCheck = pendingVideos.slice(0, 20);
+            const response = await fetch(`/api/videos/integrity/status?video_ids=${toCheck.join(',')}`);
             if (!response.ok) return;
             
             const data = await response.json();
@@ -943,7 +1057,7 @@ function startPolling() {
         } catch (err) {
             console.log('轮询失败:', err);
         }
-    }, 2000); // 每2秒轮询一次
+    }, 3000); // 每3秒轮询一次（从2秒增加）
 }
 
 /**

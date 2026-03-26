@@ -24,6 +24,6 @@ echo "📥 检查依赖..."
 pip install -q --upgrade pip
 pip install -q -r requirements.txt
 
-# 启动服务
-echo "🚀 启动视频服务器..."
-python app.py
+# 启动服务（多worker模式，提升并发处理能力）
+echo "🚀 启动视频服务器 (4 workers)..."
+uvicorn app:app --host 0.0.0.0 --port 8000 --workers 4
