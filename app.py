@@ -9,17 +9,31 @@ import mimetypes
 import json
 import subprocess
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import unquote
 
-from fastapi import FastAPI, Request, Query, HTTPException
-from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, Response
+from fastapi import FastAPI, Request, Query, HTTPException, Depends, Form
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
 
 # 初始化应用
 app = FastAPI(title="局域网视频服务器")
+
+# 读取配置以获取 secret_key
+_config = configparser.ConfigParser()
+_config.read("config.ini", encoding='utf-8')
+_secret_key = _config.get('auth', 'secret_key', fallback='videoserver-secret-key-change-in-production')
+
+# 添加 Session 中间件
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_secret_key,
+    session_cookie="video_session",
+    max_age=60 * 60 * 24 * 7,  # 7天
+)
 
 # 获取项目根目录
 BASE_DIR = Path(__file__).resolve().parent
@@ -44,6 +58,12 @@ class VideoServer:
         # 服务器配置
         self.host = self.config.get('server', 'host', fallback='0.0.0.0')
         self.port = self.config.getint('server', 'port', fallback=8000)
+        
+        # 认证配置
+        self.auth_enabled = self.config.getboolean('auth', 'enabled', fallback=False)
+        self.auth_username = self.config.get('auth', 'username', fallback='admin')
+        self.auth_password = self.config.get('auth', 'password', fallback='hx123456')
+        self.secret_key = self.config.get('auth', 'secret_key', fallback='videoserver-secret-key-change-in-production')
         
         # 视频目录
         dirs_str = self.config.get('video', 'directories', fallback='~/Movies')
@@ -333,7 +353,62 @@ def get_mime_type(file_path: str) -> str:
     return mime_type or 'application/octet-stream'
 
 
+# ==================== 认证相关 ====================
+
+def get_current_user(request: Request) -> Optional[str]:
+    """获取当前登录用户"""
+    return request.session.get("user")
+
+
+def require_auth(request: Request):
+    """验证用户是否已登录"""
+    if video_server.auth_enabled:
+        user = get_current_user(request)
+        if not user:
+            raise HTTPException(
+                status_code=302,
+                headers={"Location": "/login"}
+            )
+    return True
+
+
 # ==================== 路由 ====================
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """登录页面"""
+    # 如果已经登录，重定向到首页
+    if get_current_user(request):
+        return RedirectResponse(url="/", status_code=302)
+    
+    return templates.TemplateResponse(
+        "login.html",
+        {"request": request, "error": None}
+    )
+
+
+@app.post("/login", response_class=HTMLResponse)
+async def login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...)
+):
+    """处理登录"""
+    if username == video_server.auth_username and password == video_server.auth_password:
+        request.session["user"] = username
+        return RedirectResponse(url="/", status_code=302)
+    
+    return templates.TemplateResponse(
+        "login.html",
+        {"request": request, "error": "用户名或密码错误"}
+    )
+
+
+@app.get("/logout")
+async def logout(request: Request):
+    """登出"""
+    request.session.clear()
+    return RedirectResponse(url="/login", status_code=302)
 
 @app.get("/", response_class=HTMLResponse)
 async def index(
@@ -344,6 +419,10 @@ async def index(
     browse: str = Query(default=""),
 ):
     """首页 - 视频列表/目录浏览"""
+    # 认证检查
+    if video_server.auth_enabled and not get_current_user(request):
+        return RedirectResponse(url="/login", status_code=302)
+    
     directories = video_server.get_directories()
     
     # 如果指定了浏览目录
@@ -402,6 +481,10 @@ async def index(
 @app.get("/play/{video_id}", response_class=HTMLResponse)
 async def play(request: Request, video_id: str):
     """播放页面"""
+    # 认证检查
+    if video_server.auth_enabled and not get_current_user(request):
+        return RedirectResponse(url="/login", status_code=302)
+    
     videos = video_server.scan_videos()
     video = None
     for v in videos:
@@ -426,6 +509,10 @@ async def play(request: Request, video_id: str):
 @app.get("/stream/{video_id}")
 async def stream_video(video_id: str, request: Request):
     """视频流传输（支持Range请求）"""
+    # 认证检查
+    if video_server.auth_enabled and not get_current_user(request):
+        raise HTTPException(status_code=401, detail="未登录")
+    
     videos = video_server.scan_videos()
     video_path = None
     
