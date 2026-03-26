@@ -59,8 +59,16 @@ function initSearch() {
 function initVideoCards() {
     document.querySelectorAll('.video-card').forEach(card => {
         card.addEventListener('click', function(e) {
-            // 如果是损坏视频，阻止跳转
             const wrapper = this.closest('.video-card-wrapper');
+            
+            // 如果是下载中视频，阻止跳转
+            if (wrapper && wrapper.classList.contains('downloading')) {
+                e.preventDefault();
+                showDownloadingAlert(wrapper.dataset.videoName, wrapper.dataset.downloadReason);
+                return false;
+            }
+            
+            // 如果是损坏视频，阻止跳转
             if (wrapper && wrapper.classList.contains('corrupted')) {
                 e.preventDefault();
                 showCorruptedAlert(wrapper.dataset.videoName);
@@ -68,6 +76,41 @@ function initVideoCards() {
             }
         });
     });
+}
+
+/**
+ * 显示下载中提示
+ */
+function showDownloadingAlert(videoName, reason) {
+    const modal = document.getElementById('downloadingAlertModal');
+    if (modal) {
+        const nameEl = modal.querySelector('.downloading-video-name');
+        if (nameEl) nameEl.textContent = videoName;
+        modal.classList.add('show');
+    } else {
+        // 备用：toast提示
+        let toast = document.getElementById('downloadingToast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'downloadingToast';
+            toast.className = 'downloading-toast';
+            toast.innerHTML = `
+                <div class="toast-icon"><i class="bi bi-download"></i></div>
+                <div class="toast-content">
+                    <div class="toast-title">正在下载</div>
+                    <div class="toast-message"></div>
+                </div>
+            `;
+            document.body.appendChild(toast);
+        }
+        
+        toast.querySelector('.toast-message').textContent = videoName;
+        toast.classList.add('show');
+        
+        setTimeout(() => {
+            toast.classList.remove('show');
+        }, 3000);
+    }
 }
 
 /**
@@ -497,8 +540,118 @@ function initAutoIntegrityCheck() {
     
     if (videoIds.length === 0) return;
     
-    // 批量检查完整性
-    batchCheckIntegrity(videoIds);
+    // 先批量检查下载状态
+    batchCheckVideoStatus(videoIds).then(() => {
+        // 然后批量检查完整性（仅对状态为normal的视频）
+        batchCheckIntegrity(videoIds);
+    });
+}
+
+/**
+ * 批量检查视频状态（下载中/损坏/正常）
+ */
+async function batchCheckVideoStatus(videoIds) {
+    try {
+        const response = await fetch('/api/videos/status/batch', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ video_ids: videoIds })
+        });
+        
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        
+        if (data.results) {
+            Object.entries(data.results).forEach(([videoId, result]) => {
+                updateVideoCardStatus(videoId, result);
+            });
+        }
+        
+    } catch (err) {
+        console.log('状态检查失败:', err);
+    }
+}
+
+/**
+ * 更新视频卡片状态显示
+ */
+function updateVideoCardStatus(videoId, result) {
+    const wrapper = document.querySelector(`.video-card-wrapper[data-video-id="${videoId}"]`);
+    if (!wrapper) return;
+    
+    // 移除所有状态类
+    wrapper.classList.remove('corrupted', 'downloading');
+    
+    if (result.status === 'downloading') {
+        // 标记为下载中
+        wrapper.classList.add('downloading');
+        wrapper.dataset.downloadReason = result.reason || '';
+        
+        // 添加下载中占位图
+        const thumb = wrapper.querySelector('.video-thumb');
+        if (thumb && !thumb.querySelector('.downloading-placeholder')) {
+            const thumbnail = thumb.querySelector('.video-thumbnail');
+            const preview = thumb.querySelector('.video-preview');
+            const playOverlay = thumb.querySelector('.play-overlay');
+            
+            if (thumbnail) thumbnail.style.display = 'none';
+            if (preview) preview.style.display = 'none';
+            if (playOverlay) playOverlay.style.display = 'none';
+            
+            const placeholder = document.createElement('div');
+            placeholder.className = 'downloading-placeholder';
+            placeholder.innerHTML = `
+                <div class="downloading-icon">
+                    <i class="bi bi-download"></i>
+                </div>
+                <div class="downloading-text">
+                    正在下载
+                    <small>${result.reason || '文件正在写入'}</small>
+                </div>
+            `;
+            thumb.appendChild(placeholder);
+        }
+    } else if (result.status === 'corrupted') {
+        // 标记为损坏（但如果是下载中的临时文件，不显示为损坏）
+        const reason = result.reason || '';
+        if (!reason.includes('临时文件')) {
+            wrapper.classList.add('corrupted');
+            showCorruptedPlaceholder(wrapper, result.reason);
+        }
+    }
+    // status === 'normal' 不需要特殊处理
+}
+
+/**
+ * 显示损坏占位图
+ */
+function showCorruptedPlaceholder(wrapper, reason) {
+    const thumb = wrapper.querySelector('.video-thumb');
+    if (thumb && !thumb.querySelector('.corrupted-placeholder')) {
+        const thumbnail = thumb.querySelector('.video-thumbnail');
+        const preview = thumb.querySelector('.video-preview');
+        const playOverlay = thumb.querySelector('.play-overlay');
+        
+        if (thumbnail) thumbnail.style.display = 'none';
+        if (preview) preview.style.display = 'none';
+        if (playOverlay) playOverlay.style.display = 'none';
+        
+        const placeholder = document.createElement('div');
+        placeholder.className = 'corrupted-placeholder';
+        placeholder.innerHTML = `
+            <div class="corrupted-icon">
+                <i class="bi bi-file-earmark-x"></i>
+            </div>
+            <div class="corrupted-text">
+                视频已损坏
+                <small>${reason || '无法播放'}</small>
+            </div>
+        `;
+        thumb.appendChild(placeholder);
+    }
 }
 
 /**
@@ -578,42 +731,19 @@ function stopPolling() {
 }
 
 /**
- * 更新视频卡片显示
+ * 更新视频卡片显示（用于完整性检查结果）
  */
 function updateVideoCard(videoId, result) {
     const wrapper = document.querySelector(`.video-card-wrapper[data-video-id="${videoId}"]`);
     if (!wrapper) return;
     
+    // 如果已经标记为下载中，不覆盖为损坏
+    if (wrapper.classList.contains('downloading')) return;
+    
     if (result.valid === false) {
         // 标记为损坏
         wrapper.classList.add('corrupted');
-        
-        // 替换缩略图为损坏占位图
-        const thumb = wrapper.querySelector('.video-thumb');
-        if (thumb && !thumb.querySelector('.corrupted-placeholder')) {
-            // 移除原有内容
-            const thumbnail = thumb.querySelector('.video-thumbnail');
-            const preview = thumb.querySelector('.video-preview');
-            const playOverlay = thumb.querySelector('.play-overlay');
-            
-            if (thumbnail) thumbnail.style.display = 'none';
-            if (preview) preview.style.display = 'none';
-            if (playOverlay) playOverlay.style.display = 'none';
-            
-            // 添加损坏占位图
-            const placeholder = document.createElement('div');
-            placeholder.className = 'corrupted-placeholder';
-            placeholder.innerHTML = `
-                <div class="corrupted-icon">
-                    <i class="bi bi-file-earmark-x"></i>
-                </div>
-                <div class="corrupted-text">
-                    视频已损坏
-                    <small>${result.error || '无法播放'}</small>
-                </div>
-            `;
-            thumb.appendChild(placeholder);
-        }
+        showCorruptedPlaceholder(wrapper, result.error);
     }
 }
 

@@ -46,6 +46,168 @@ def get_video_id(video_path: str) -> str:
     """生成确定性的视频ID（使用MD5，跨进程一致）"""
     return hashlib.md5(video_path.encode('utf-8')).hexdigest()[:16]
 
+
+# ==================== 下载状态检测 ====================
+
+def is_temp_file(file_path: str) -> bool:
+    """检查文件是否有临时下载后缀"""
+    # 检查文件本身的扩展名
+    _, ext = os.path.splitext(file_path)
+    if ext.lower() in DOWNLOADING_EXTENSIONS:
+        return True
+    
+    # 检查同目录下是否有对应的临时文件
+    # 例如 video.mp4.part 或 video.mp4.downloading
+    for temp_ext in DOWNLOADING_EXTENSIONS:
+        temp_path = file_path + temp_ext
+        if os.path.exists(temp_path):
+            return True
+    
+    return False
+
+
+def is_file_locked(file_path: str) -> bool:
+    """检查文件是否被其他进程占用/锁定（macOS/Linux）"""
+    try:
+        # 使用 lsof 检查文件是否被打开
+        result = subprocess.run(
+            ['lsof', '-f', '--', file_path],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        # lsof 返回非零表示文件未被打开，返回零且有输出表示被打开
+        if result.returncode == 0 and result.stdout.strip():
+            # 过滤掉当前进程
+            lines = result.stdout.strip().split('\n')
+            for line in lines[1:]:  # 跳过标题行
+                if line.strip():
+                    return True
+        return False
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        # lsof 不可用，尝试另一种方法
+        pass
+    
+    # 备用方法：尝试以独占模式打开文件
+    try:
+        # 尝试重命名文件来测试是否被锁定
+        test_path = file_path + '.locktest'
+        try:
+            os.rename(file_path, test_path)
+            os.rename(test_path, file_path)
+            return False
+        except OSError:
+            return True
+    except:
+        return False
+
+
+def is_file_growing(file_path: str) -> bool:
+    """检查文件大小是否在变化（表示正在下载）
+    
+    需要连续两次检查（间隔 FILE_SIZE_CHECK_INTERVAL 秒）且大小变化才返回 True
+    首次检查只记录状态，不判断为正在下载
+    """
+    if not os.path.exists(file_path):
+        return False
+    
+    try:
+        # 获取当前大小
+        current_size = os.path.getsize(file_path)
+        current_time = time.time()
+        
+        with FILE_SIZE_CACHE_LOCK:
+            cached = FILE_SIZE_CACHE.get(file_path)
+            
+            if cached:
+                time_diff = current_time - cached.get("checked_at", 0)
+                
+                # 必须超过检测间隔才能判断
+                if time_diff >= FILE_SIZE_CHECK_INTERVAL:
+                    if current_size != cached.get("size"):
+                        # 大小变化，正在下载，更新缓存
+                        FILE_SIZE_CACHE[file_path] = {
+                            "size": current_size,
+                            "checked_at": current_time
+                        }
+                        return True
+                    else:
+                        # 大小没变，更新时间戳，不是下载中
+                        FILE_SIZE_CACHE[file_path] = {
+                            "size": current_size,
+                            "checked_at": current_time
+                        }
+                        return False
+                else:
+                    # 还在等待间隔，返回上次结果（False，不确定）
+                    return False
+            
+            # 首次检查，只记录大小，不判断为下载中
+            FILE_SIZE_CACHE[file_path] = {
+                "size": current_size,
+                "checked_at": current_time
+            }
+            return False
+    except OSError:
+        return False
+
+
+def check_video_status(video_path: str) -> dict:
+    """
+    检查视频文件状态
+    返回: {
+        "status": "normal" | "downloading" | "corrupted",
+        "reason": str (可选，说明原因)
+    }
+    """
+    if not os.path.exists(video_path):
+        return {"status": "corrupted", "reason": "文件不存在"}
+    
+    # 1. 检查临时后缀
+    if is_temp_file(video_path):
+        return {"status": "downloading", "reason": "临时文件"}
+    
+    # 2. 检查文件是否被锁定
+    if is_file_locked(video_path):
+        return {"status": "downloading", "reason": "文件被占用"}
+    
+    # 3. 检查文件大小是否在变化
+    if is_file_growing(video_path):
+        return {"status": "downloading", "reason": "正在写入"}
+    
+    # 4. 检查视频完整性（快速检查）
+    try:
+        cmd = [
+            'ffprobe', '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=codec_name',
+            '-of', 'json',
+            video_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        
+        if result.returncode != 0:
+            return {"status": "corrupted", "reason": "无法读取视频流"}
+        
+        data = json.loads(result.stdout)
+        streams = data.get('streams', [])
+        
+        if not streams or not streams[0].get('codec_name'):
+            return {"status": "corrupted", "reason": "无视频流"}
+        
+        return {"status": "normal", "reason": None}
+        
+    except subprocess.TimeoutExpired:
+        return {"status": "corrupted", "reason": "检查超时"}
+    except json.JSONDecodeError:
+        return {"status": "corrupted", "reason": "解析失败"}
+    except FileNotFoundError:
+        # ffprobe 不可用，假设正常
+        return {"status": "normal", "reason": None}
+    except Exception as e:
+        return {"status": "corrupted", "reason": str(e)[:30]}
+
+
 # 缩略图缓存目录
 THUMBNAIL_DIR = BASE_DIR / "thumbnails"
 THUMBNAIL_DIR.mkdir(exist_ok=True)
@@ -55,6 +217,19 @@ THUMBNAIL_DIR.mkdir(exist_ok=True)
 VIDEO_INTEGRITY_CACHE: Dict[str, dict] = {}
 CACHE_LOCK = threading.Lock()
 CACHE_EXPIRE_HOURS = 24  # 缓存过期时间
+
+# 下载中文件检测临时后缀
+DOWNLOADING_EXTENSIONS = {
+    '.part', '.downloading', '.temp', '.crdownload', 
+    '.partial', '.download', '.!ut', '.opdownload',
+    '.xltd', '.td', '.tmp'
+}
+
+# 文件大小变化检测缓存
+# 结构: {video_path: {"size": int, "checked_at": float}}
+FILE_SIZE_CACHE: Dict[str, dict] = {}
+FILE_SIZE_CACHE_LOCK = threading.Lock()
+FILE_SIZE_CHECK_INTERVAL = 2.0  # 秒
 
 # 视频扫描缓存（文件缓存）
 VIDEO_SCAN_CACHE_FILE = BASE_DIR / ".video_scan_cache"
@@ -189,6 +364,10 @@ class VideoServer:
             else:
                 ext = os.path.splitext(item)[1].lower()
                 if ext in self.extensions:
+                    # 跳过临时下载文件
+                    if is_temp_file(item_path):
+                        continue
+                    
                     try:
                         stat = os.stat(item_path)
                         videos.append({
@@ -314,6 +493,10 @@ class VideoServer:
                         continue
                     
                     full_path = os.path.join(root, file)
+                    
+                    # 跳过临时下载文件
+                    if is_temp_file(full_path):
+                        continue
                     
                     # 搜索过滤
                     if search and search.lower() not in file.lower():
@@ -990,6 +1173,41 @@ async def get_video_integrity(video_id: str):
     set_cached_integrity(video_id, result)
     
     return {"video_id": video_id, "cached": False, **result}
+
+
+@app.get("/api/video/status/{video_id}")
+async def get_video_status_api(video_id: str):
+    """API: 获取单个视频的完整状态（下载中/损坏/正常）"""
+    video_path = video_server.get_video_path(video_id)
+    if not video_path:
+        return {"video_id": video_id, "status": "corrupted", "reason": "视频不存在"}
+    
+    status = check_video_status(video_path)
+    return {"video_id": video_id, **status}
+
+
+@app.post("/api/videos/status/batch")
+async def batch_check_video_status(request: Request):
+    """API: 批量检查视频状态（下载中/损坏/正常）"""
+    try:
+        body = await request.json()
+        video_ids = body.get("video_ids", [])
+    except:
+        video_ids = []
+    
+    if not video_ids:
+        return {"results": {}}
+    
+    results = {}
+    
+    for video_id in video_ids[:50]:  # 限制每次最多50个
+        video_path = video_server.get_video_path(video_id)
+        if video_path:
+            results[video_id] = check_video_status(video_path)
+        else:
+            results[video_id] = {"status": "corrupted", "reason": "视频不存在"}
+    
+    return {"results": results}
 
 
 @app.post("/api/videos/integrity/batch")

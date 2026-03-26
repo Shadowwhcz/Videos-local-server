@@ -1476,6 +1476,160 @@ body {
     }
 }
 
+/* ============================================
+   下载中视频样式
+   ============================================ */
+
+/* 下载中视频卡片 */
+.video-card-wrapper.downloading .video-card {
+    border-color: rgba(59, 130, 246, 0.5) !important;
+    opacity: 0.85;
+}
+
+.video-card-wrapper.downloading .video-card:hover {
+    border-color: rgba(59, 130, 246, 0.8) !important;
+    box-shadow: 0 4px 20px rgba(59, 130, 246, 0.3) !important;
+}
+
+.video-card-wrapper.downloading .video-thumb {
+    background: linear-gradient(135deg, #0a1a2e 0%, #102a4e 100%) !important;
+}
+
+.video-card-wrapper.downloading .video-title {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.video-card-wrapper.downloading .video-meta {
+    opacity: 0.6;
+}
+
+/* 下载中占位图 */
+.downloading-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #0a1a2e 0%, #102a4e 50%, #0a1a2e 100%);
+    z-index: 5;
+}
+
+.downloading-placeholder::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: 
+        repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 2px,
+            rgba(59, 130, 246, 0.03) 2px,
+            rgba(59, 130, 246, 0.03) 4px
+        );
+    pointer-events: none;
+}
+
+.downloading-icon {
+    width: 64px;
+    height: 64px;
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
+    margin-bottom: 12px;
+    animation: pulse-download 2s ease-in-out infinite;
+}
+
+.downloading-icon i {
+    font-size: 2rem;
+    color: #fff;
+}
+
+.downloading-text {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.85rem;
+    font-weight: 500;
+    text-align: center;
+    padding: 0 1rem;
+}
+
+.downloading-text small {
+    display: block;
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.4);
+    margin-top: 4px;
+}
+
+@keyframes pulse-download {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
+    }
+    50% {
+        transform: scale(1.05);
+        box-shadow: 0 6px 30px rgba(59, 130, 246, 0.6);
+    }
+}
+
+/* 下载中 Toast 提示 */
+.downloading-toast {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: linear-gradient(135deg, #1e3a5f 0%, #1a365d 100%);
+    border: 1px solid rgba(59, 130, 246, 0.5);
+    border-radius: 12px;
+    padding: 1rem 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    z-index: 3000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+}
+
+.downloading-toast.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
+
+.downloading-toast .toast-icon {
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.downloading-toast .toast-icon i {
+    font-size: 1.25rem;
+    color: #fff;
+}
+
+.downloading-toast .toast-title {
+    font-weight: 600;
+    color: #fff;
+    font-size: 0.95rem;
+}
+
+.downloading-toast .toast-message {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.8rem;
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* 视频卡片损坏警告图标（旧版，保留兼容） */
 .corrupted-warning {
     position: absolute;
