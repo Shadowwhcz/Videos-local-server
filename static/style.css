@@ -11,6 +11,17 @@
     box-sizing: border-box;
 }
 
+/* 粒子背景容器 */
+#particles-js {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    pointer-events: none;
+}
+
 body {
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
     min-height: 100vh;
@@ -517,6 +528,25 @@ body {
     }
     
     .ext-badge {
+        display: none;
+    }
+    
+    /* 移动端粒子优化 - 降低性能消耗 */
+    #particles-js {
+        opacity: 0.6;
+    }
+}
+
+/* 粒子背景移动端适配 */
+@media (max-width: 768px) {
+    #particles-js {
+        opacity: 0.7;
+    }
+}
+
+/* 低性能设备检测 */
+@media (prefers-reduced-motion: reduce) {
+    #particles-js {
         display: none;
     }
 }
