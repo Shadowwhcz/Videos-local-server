@@ -497,6 +497,14 @@ body {
     grid-template-columns: repeat(2, 1fr);
 }
 
+/* 大屏手机 (iPhone 13/14 Pro Max: 428px) */
+@media (min-width: 414px) and (max-width: 475.98px) {
+    .video-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+    }
+}
+
 /* 平板竖屏 */
 @media (min-width: 576px) {
     .video-grid {
@@ -959,6 +967,354 @@ body {
 /* ============================================
    响应式设计 - 详细断点
    ============================================ */
+
+/* ============================================
+   大屏手机专用适配 (iPhone 13/14 Pro Max: 428px)
+   支持: iPhone 12 Pro Max (390px), iPhone 13 Pro Max (428px), 
+         iPhone 14 Pro Max (430px), iPhone 15 Pro Max (430px)
+   ============================================ */
+
+/* 大屏手机竖屏 (414px - 475px) */
+@media (min-width: 414px) and (max-width: 475.98px) {
+    .container {
+        padding: 0 1rem;
+    }
+    
+    .navbar {
+        padding: 0.875rem 0;
+    }
+    
+    .navbar-brand {
+        font-size: 1.25rem;
+    }
+    
+    .navbar-brand i {
+        font-size: 1.5rem;
+    }
+    
+    /* 搜索框适配 */
+    .search-box {
+        max-width: 100%;
+    }
+    
+    .search-box input {
+        padding: 0.7rem 1.1rem 0.7rem 2.75rem;
+        font-size: 0.95rem;
+        border-radius: var(--radius-xl);
+    }
+    
+    .search-box .search-icon {
+        left: 1rem;
+        font-size: 1.05rem;
+    }
+    
+    /* 目录网格 - 大屏手机显示2列 */
+    .directory-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.875rem;
+    }
+    
+    .directory-card {
+        padding: 1rem 1.1rem;
+    }
+    
+    .dir-icon {
+        width: 48px;
+        height: 48px;
+    }
+    
+    .dir-icon i {
+        font-size: 1.35rem;
+    }
+    
+    .dir-name {
+        font-size: 1rem;
+    }
+    
+    .dir-count {
+        font-size: 0.8rem;
+    }
+    
+    /* 视频卡片适配 */
+    .video-card:hover {
+        transform: translateY(-4px) scale(1.015);
+    }
+    
+    .video-info {
+        padding: 0.75rem 0.85rem;
+    }
+    
+    .video-title {
+        font-size: 0.85rem;
+        min-height: 2.3em;
+        line-height: 1.35;
+    }
+    
+    .video-folder {
+        font-size: 0.7rem;
+        margin-bottom: 0.4rem;
+    }
+    
+    .video-meta {
+        gap: 0.5rem;
+    }
+    
+    .video-meta span {
+        font-size: 0.7rem;
+    }
+    
+    .video-meta .ext-badge {
+        font-size: 0.6rem;
+        padding: 0.18rem 0.45rem;
+    }
+    
+    /* 播放按钮大小 */
+    .play-btn {
+        width: 50px;
+        height: 50px;
+    }
+    
+    .play-btn i {
+        font-size: 1.25rem;
+    }
+    
+    .thumb-placeholder i {
+        font-size: 2.5rem;
+    }
+    
+    /* 统计栏 */
+    .stats-bar {
+        padding: 0.9rem 1.1rem;
+        gap: 0.8rem;
+    }
+    
+    .stat-item {
+        font-size: 0.9rem;
+    }
+    
+    .stat-item i {
+        font-size: 1.15rem;
+    }
+    
+    /* 文件夹网格 */
+    .folder-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.75rem;
+    }
+    
+    .folder-card {
+        padding: 0.9rem 1rem;
+    }
+    
+    .folder-icon {
+        font-size: 1.35rem;
+    }
+    
+    .folder-name {
+        font-size: 0.9rem;
+    }
+    
+    /* 面包屑 */
+    .breadcrumb-nav {
+        padding: 0.75rem 1rem;
+        font-size: 0.85rem;
+    }
+    
+    /* 分页 */
+    .page-link {
+        padding: 0.55rem 0.85rem;
+        min-width: 40px;
+        font-size: 0.9rem;
+    }
+    
+    /* 空状态 */
+    .empty-state {
+        padding: 3.5rem 1.75rem;
+    }
+    
+    .empty-state i {
+        font-size: 5rem;
+    }
+    
+    .empty-state h3 {
+        font-size: 1.15rem;
+    }
+}
+
+/* 大屏手机横屏模式 (iPhone 13 Pro Max: 926px, iPhone 14 Pro Max: 932px) */
+@media (min-width: 844px) and (max-width: 955.98px) and (orientation: landscape) {
+    /* 安全区域适配 - 刘海/灵动岛 */
+    body {
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+    }
+    
+    .navbar {
+        padding: 0.6rem 0;
+    }
+    
+    .navbar-brand {
+        font-size: 1.15rem;
+    }
+    
+    .navbar-brand i {
+        font-size: 1.3rem;
+    }
+    
+    /* 横屏搜索框 */
+    .search-box {
+        max-width: 350px;
+    }
+    
+    .search-box input {
+        padding: 0.5rem 1rem 0.5rem 2.5rem;
+        font-size: 0.9rem;
+    }
+    
+    /* 横屏视频网格 - 显示3列 */
+    .video-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1rem;
+    }
+    
+    /* 视频卡片横屏适配 */
+    .video-info {
+        padding: 0.6rem 0.75rem;
+    }
+    
+    .video-title {
+        font-size: 0.8rem;
+        min-height: 2.1em;
+    }
+    
+    .video-folder {
+        font-size: 0.65rem;
+    }
+    
+    .video-meta span {
+        font-size: 0.65rem;
+    }
+    
+    .video-meta .ext-badge {
+        font-size: 0.55rem;
+        padding: 0.15rem 0.4rem;
+    }
+    
+    /* 播放按钮 */
+    .play-btn {
+        width: 44px;
+        height: 44px;
+    }
+    
+    .play-btn i {
+        font-size: 1.1rem;
+    }
+    
+    /* 目录网格横屏 */
+    .directory-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.75rem;
+    }
+    
+    .directory-card {
+        padding: 0.85rem 1rem;
+    }
+    
+    .dir-icon {
+        width: 42px;
+        height: 42px;
+    }
+    
+    .dir-icon i {
+        font-size: 1.15rem;
+    }
+    
+    .dir-name {
+        font-size: 0.9rem;
+    }
+    
+    .dir-count {
+        font-size: 0.75rem;
+    }
+    
+    /* 文件夹网格横屏 */
+    .folder-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.65rem;
+    }
+    
+    /* 统计栏横屏 */
+    .stats-bar {
+        padding: 0.6rem 1rem;
+    }
+    
+    .stat-item {
+        font-size: 0.85rem;
+    }
+    
+    /* 面包屑横屏 */
+    .breadcrumb-nav {
+        padding: 0.5rem 0.85rem;
+        font-size: 0.8rem;
+    }
+    
+    /* 分页横屏 */
+    .page-link {
+        padding: 0.4rem 0.7rem;
+        min-width: 36px;
+        font-size: 0.85rem;
+    }
+    
+    /* 粒子背景横屏优化 */
+    #particles-js {
+        opacity: 0.6;
+    }
+}
+
+/* 超大屏手机横屏 (iPhone 14/15 Pro Max: 932px+) */
+@media (min-width: 956px) and (max-width: 1023.98px) and (orientation: landscape) {
+    body {
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+    }
+    
+    .video-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1.1rem;
+    }
+    
+    .directory-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+    
+    .folder-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+/* ============================================
+   iPhone 安全区域适配 (刘海/灵动岛)
+   ============================================ */
+
+@supports (padding: env(safe-area-inset-bottom)) {
+    /* 底部安全区域 */
+    footer {
+        padding-bottom: calc(2rem + env(safe-area-inset-bottom));
+    }
+    
+    /* 横屏左右安全区域 */
+    @media (orientation: landscape) {
+        .navbar .container {
+            padding-left: calc(1.5rem + env(safe-area-inset-left));
+            padding-right: calc(1.5rem + env(safe-area-inset-right));
+        }
+        
+        main.container {
+            padding-left: calc(1.5rem + env(safe-area-inset-left));
+            padding-right: calc(1.5rem + env(safe-area-inset-right));
+        }
+    }
+}
 
 /* 移动端 - 手机竖屏 (< 576px) */
 @media (max-width: 575.98px) {

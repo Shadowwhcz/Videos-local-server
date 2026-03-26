@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#0f0f1a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -52,6 +52,108 @@
             }
         }
         
+        /* 大屏手机竖屏播放器优化 (iPhone 13/14 Pro Max: 428px) */
+        @media (min-width: 414px) and (max-width: 475.98px) {
+            .player-container {
+                padding: 1rem;
+            }
+            
+            .player-wrapper video {
+                max-height: 55vh;
+            }
+            
+            .back-btn {
+                padding: 0.65rem 1.1rem;
+                font-size: 0.95rem;
+            }
+            
+            .video-panel {
+                padding: 1.25rem;
+            }
+            
+            .video-panel h1 {
+                font-size: 1.1rem;
+            }
+            
+            .video-details {
+                gap: 1rem;
+            }
+            
+            .detail-item {
+                font-size: 0.9rem;
+            }
+        }
+        
+        /* 大屏手机横屏播放器优化 */
+        @media (min-width: 844px) and (max-width: 955.98px) and (orientation: landscape) {
+            .player-container {
+                padding: 0.75rem;
+                padding-left: calc(0.75rem + env(safe-area-inset-left));
+                padding-right: calc(0.75rem + env(safe-area-inset-right));
+                max-width: 100%;
+            }
+            
+            .player-wrapper {
+                border-radius: var(--radius-md);
+            }
+            
+            .player-wrapper video {
+                max-height: 85vh;
+                width: 100%;
+            }
+            
+            .back-btn {
+                padding: 0.5rem 0.9rem;
+                font-size: 0.85rem;
+                margin-bottom: 0.75rem;
+            }
+            
+            .back-btn i {
+                font-size: 1rem;
+            }
+            
+            .video-panel {
+                padding: 0.85rem 1rem;
+                margin-top: 0.75rem;
+            }
+            
+            .video-panel h1 {
+                font-size: 0.95rem;
+                margin-bottom: 0.75rem;
+            }
+            
+            .video-details {
+                gap: 0.75rem;
+                flex-wrap: wrap;
+            }
+            
+            .detail-item {
+                font-size: 0.8rem;
+            }
+            
+            .detail-item i {
+                font-size: 1rem;
+            }
+            
+            .shortcuts {
+                display: none;
+            }
+            
+            /* 横屏时更紧凑的布局 */
+            .video-details {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 0.5rem 1rem;
+            }
+        }
+        
+        /* 超大屏手机横屏 (iPhone 14/15 Pro Max: 932px+) */
+        @media (min-width: 956px) and (max-width: 1023.98px) and (orientation: landscape) {
+            .player-wrapper video {
+                max-height: 88vh;
+            }
+        }
+        
         /* Video controls styling */
         video::-webkit-media-controls-panel {
             background: linear-gradient(transparent, rgba(0,0,0,0.85));
@@ -76,6 +178,16 @@
             .player-wrapper video {
                 max-height: 75vh;
             }
+        }
+        
+        /* iOS 全屏播放器优化 */
+        video::-webkit-media-controls-start-playback-button {
+            opacity: 0;
+        }
+        
+        /* 确保视频在 iOS 上正确显示 */
+        video {
+            -webkit-transform: translateZ(0);
         }
     </style>
     
