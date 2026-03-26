@@ -147,6 +147,41 @@
             margin-right: 8px;
         }
         
+        /* 记住我复选框样式 */
+        .form-check {
+            display: flex;
+            align-items: center;
+        }
+        
+        .form-check-input {
+            width: 18px;
+            height: 18px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .form-check-input:checked {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-color: #667eea;
+        }
+        
+        .form-check-input:focus {
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+        }
+        
+        .form-check-label {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.9rem;
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .form-check-label i {
+            opacity: 0.7;
+        }
+        
         /* Particles background */
         #particles-js {
             position: fixed;
@@ -189,7 +224,7 @@
             </div>
             {% endif %}
             
-            <form method="POST" action="/login">
+            <form method="POST" action="/login" id="loginForm">
                 <div class="form-floating position-relative">
                     <input type="text" class="form-control" id="username" name="username" 
                            placeholder="用户名" required autofocus autocomplete="username">
@@ -200,6 +235,13 @@
                     <input type="password" class="form-control" id="password" name="password" 
                            placeholder="密码" required autocomplete="current-password">
                     <label for="password"><i class="bi bi-lock me-2"></i>密码</label>
+                </div>
+                
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="remember" name="remember">
+                    <label class="form-check-label" for="remember">
+                        <i class="bi bi-key me-1"></i>记住登录（30天内免登录）
+                    </label>
                 </div>
                 
                 <button type="submit" class="btn-login">
@@ -215,6 +257,38 @@
     <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"></script>
     <script>
     document.addEventListener('DOMContentLoaded', function() {
+        // 从localStorage恢复保存的用户名
+        const savedUsername = localStorage.getItem('video_server_username');
+        const savedRemember = localStorage.getItem('video_server_remember');
+        const usernameInput = document.getElementById('username');
+        const rememberCheckbox = document.getElementById('remember');
+        
+        if (savedUsername) {
+            usernameInput.value = savedUsername;
+        }
+        
+        if (savedRemember === 'true') {
+            rememberCheckbox.checked = true;
+        }
+        
+        // 登录表单提交时保存用户名
+        const loginForm = document.getElementById('loginForm');
+        if (loginForm) {
+            loginForm.addEventListener('submit', function() {
+                const username = usernameInput.value;
+                const remember = rememberCheckbox.checked;
+                
+                // 无论是否勾选"记住登录"，都保存用户名方便下次输入
+                if (username) {
+                    localStorage.setItem('video_server_username', username);
+                }
+                
+                // 保存"记住登录"状态
+                localStorage.setItem('video_server_remember', remember.toString());
+            });
+        }
+        
+        // 粒子背景
         if (typeof particlesJS !== 'undefined') {
             particlesJS('particles-js', {
                 particles: {

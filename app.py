@@ -45,6 +45,9 @@ _secret_key = _config.get('auth', 'secret_key', fallback='videoserver-secret-key
 
 # ==================== 服务端 Session 管理 ====================
 # 支持同一账号多设备登录，每个设备有独立的 session
+# 使用文件存储，支持多worker模式
+
+# SESSION_STORAGE_DIR 将在 BASE_DIR 定义后设置
 
 @dataclass
 class UserSession:
@@ -54,29 +57,77 @@ class UserSession:
     created_at: float
     last_active: float
     device_info: str = ""
+    remember_me: bool = False  # 是否记住登录
 
 class SessionManager:
-    """服务端 Session 管理器"""
+    """服务端 Session 管理器（文件存储，支持多worker）"""
     
-    def __init__(self, session_expire_hours: int = 24 * 7):  # 默认7天过期
-        self.sessions: Dict[str, UserSession] = {}  # session_id -> UserSession
-        self.user_sessions: Dict[str, List[str]] = {}  # username -> [session_id1, session_id2, ...]
+    def __init__(self, session_expire_hours: int = 24 * 7, remember_days: int = 30, storage_dir: Path = None):
+        self.sessions: Dict[str, UserSession] = {}  # 内存缓存
+        self.user_sessions: Dict[str, List[str]] = {}  # 内存缓存
         self.lock = threading.RLock()
         self.expire_hours = session_expire_hours
+        self.remember_hours = remember_days * 24  # 记住登录30天
+        self._storage_dir = storage_dir  # 延迟初始化
     
-    def create_session(self, username: str, device_info: str = "") -> str:
+    @property
+    def storage_dir(self) -> Path:
+        """获取存储目录（延迟初始化）"""
+        if self._storage_dir is None:
+            # 使用默认路径
+            self._storage_dir = Path(__file__).resolve().parent / "sessions"
+        if not self._storage_dir.exists():
+            self._storage_dir.mkdir(parents=True, exist_ok=True)
+        return self._storage_dir
+    
+    def _get_session_file(self, session_id: str) -> Path:
+        """获取session文件路径"""
+        return self.storage_dir / f"{session_id}.session"
+    
+    def _load_session(self, session_id: str) -> Optional[UserSession]:
+        """从文件加载session"""
+        try:
+            file_path = self._get_session_file(session_id)
+            if file_path.exists():
+                with open(file_path, 'rb') as f:
+                    return pickle.load(f)
+        except Exception as e:
+            print(f"加载session文件失败: {e}")
+        return None
+    
+    def _save_session(self, session: UserSession):
+        """保存session到文件"""
+        try:
+            file_path = self._get_session_file(session.session_id)
+            with open(file_path, 'wb') as f:
+                pickle.dump(session, f)
+        except Exception as e:
+            print(f"保存session文件失败: {e}")
+    
+    def _delete_session_file(self, session_id: str):
+        """删除session文件"""
+        try:
+            file_path = self._get_session_file(session_id)
+            if file_path.exists():
+                file_path.unlink()
+        except Exception as e:
+            print(f"删除session文件失败: {e}")
+    
+    def create_session(self, username: str, device_info: str = "", remember_me: bool = False) -> str:
         """创建新会话，返回 session_id"""
         session_id = secrets.token_urlsafe(32)
         now = time.time()
         
+        session = UserSession(
+            session_id=session_id,
+            username=username,
+            created_at=now,
+            last_active=now,
+            device_info=device_info,
+            remember_me=remember_me
+        )
+        
         with self.lock:
-            session = UserSession(
-                session_id=session_id,
-                username=username,
-                created_at=now,
-                last_active=now,
-                device_info=device_info
-            )
             self.sessions[session_id] = session
             
             # 添加到用户的会话列表
@@ -84,19 +135,41 @@ class SessionManager:
                 self.user_sessions[username] = []
             self.user_sessions[username].append(session_id)
         
+        # 保存到文件
+        self._save_session(session)
+        
         return session_id
     
     def get_session(self, session_id: str) -> Optional[UserSession]:
         """获取会话信息"""
         with self.lock:
             session = self.sessions.get(session_id)
+            
+            # 如果内存中没有，尝试从文件加载
+            if not session:
+                session = self._load_session(session_id)
+                if session:
+                    self.sessions[session_id] = session
+                    # 重建用户会话索引
+                    if session.username not in self.user_sessions:
+                        self.user_sessions[session.username] = []
+                    if session_id not in self.user_sessions[session.username]:
+                        self.user_sessions[session.username].append(session_id)
+            
             if session:
+                # 根据remember_me决定过期时间
+                expire_hours = self.remember_hours if session.remember_me else self.expire_hours
+                
                 # 检查是否过期
-                if time.time() - session.last_active > self.expire_hours * 3600:
+                if time.time() - session.last_active > expire_hours * 3600:
                     self.delete_session(session_id)
                     return None
-                # 更新最后活跃时间
-                session.last_active = time.time()
+                
+                # 更新最后活跃时间（每隔5分钟更新一次，减少IO）
+                if time.time() - session.last_active > 300:
+                    session.last_active = time.time()
+                    self._save_session(session)
+            
             return session
     
     def delete_session(self, session_id: str):
@@ -112,6 +185,9 @@ class SessionManager:
                             del self.user_sessions[session.username]
                     except ValueError:
                         pass
+        
+        # 删除文件
+        self._delete_session_file(session_id)
     
     def delete_user_sessions(self, username: str):
         """删除用户的所有会话（登出所有设备）"""
@@ -119,6 +195,10 @@ class SessionManager:
             session_ids = self.user_sessions.pop(username, [])
             for sid in session_ids:
                 self.sessions.pop(sid, None)
+        
+        # 删除文件
+        for sid in session_ids:
+            self._delete_session_file(sid)
     
     def get_user_session_count(self, username: str) -> int:
         """获取用户的活跃会话数"""
@@ -130,28 +210,49 @@ class SessionManager:
         now = time.time()
         expired = []
         
-        with self.lock:
-            for session_id, session in list(self.sessions.items()):
-                if now - session.last_active > self.expire_hours * 3600:
-                    expired.append(session_id)
+        # 扫描文件目录
+        try:
+            for file_path in self.storage_dir.glob("*.session"):
+                try:
+                    with open(file_path, 'rb') as f:
+                        session = pickle.load(f)
+                    
+                    expire_hours = self.remember_hours if session.remember_me else self.expire_hours
+                    if now - session.last_active > expire_hours * 3600:
+                        expired.append(session.session_id)
+                except:
+                    # 损坏的文件直接删除
+                    expired.append(file_path.stem)
+        except Exception as e:
+            print(f"扫描session文件失败: {e}")
         
         for sid in expired:
             self.delete_session(sid)
+    
+    def get_expire_seconds(self, remember_me: bool = False) -> int:
+        """获取session过期时间（秒）"""
+        hours = self.remember_hours if remember_me else self.expire_hours
+        return int(hours * 3600)
 
-# 全局 Session 管理器
-session_manager = SessionManager()
+# 全局 Session 管理器（将在 BASE_DIR 定义后初始化）
+session_manager = None
 
 # 添加 Session 中间件（仅用于存储 session_id）
+# max_age 设置为30天（记住登录的最长时间），实际过期由 SessionManager 控制
 app.add_middleware(
     SessionMiddleware,
     secret_key=_secret_key,
     session_cookie="video_session_id",
-    max_age=60 * 60 * 24 * 7,  # 7天
+    max_age=60 * 60 * 24 * 30,  # 30天（记住登录的最大时长）
     same_site="lax",  # 允许跨站请求但有限制
 )
 
 # 获取项目根目录
 BASE_DIR = Path(__file__).resolve().parent
+
+# 初始化全局 Session 管理器
+SESSION_STORAGE_DIR = BASE_DIR / "sessions"
+session_manager = SessionManager(storage_dir=SESSION_STORAGE_DIR)
 
 
 def get_video_id(video_path: str) -> str:
@@ -961,22 +1062,28 @@ async def login_page(request: Request):
 async def login(
     request: Request,
     username: str = Form(...),
-    password: str = Form(...)
+    password: str = Form(...),
+    remember: str = Form(default="")  # 记住我复选框
 ):
     """处理登录"""
+    remember_me = remember == "on"  # 复选框选中时值为 "on"
+    
     if username == video_server.auth_username and password == video_server.auth_password:
         # 获取设备信息（User-Agent）
         device_info = request.headers.get("user-agent", "Unknown")[:200]
         
-        # 创建服务端会话
-        session_id = session_manager.create_session(username, device_info)
+        # 创建服务端会话（传入remember_me参数）
+        session_id = session_manager.create_session(username, device_info, remember_me)
         
         # 在 cookie 中只存储 session_id
         request.session["session_id"] = session_id
         
-        print(f"✅ 用户 {username} 登录成功，当前活跃会话数: {session_manager.get_user_session_count(username)}")
+        expire_desc = "30天" if remember_me else "7天"
+        print(f"✅ 用户 {username} 登录成功（记住我: {remember_me}，有效期: {expire_desc}），当前活跃会话数: {session_manager.get_user_session_count(username)}")
         
-        return RedirectResponse(url="/", status_code=302)
+        # 创建响应并设置cookie
+        response = RedirectResponse(url="/", status_code=302)
+        return response
     
     print(f"❌ 登录失败: 用户名={username}")
     return templates.TemplateResponse(

@@ -38,3 +38,6 @@ logs/
 
 # Thumbnails (generated)
 thumbnails/
+
+# Session storage
+sessions/
