@@ -287,6 +287,9 @@ async function fetchVideoInfo(videoId) {
  */
 function initPlayer() {
     const video = document.getElementById('videoPlayer');
+    const mobileFullscreenBtn = document.getElementById('mobileFullscreenBtn');
+    const playerWrapper = document.getElementById('playerWrapper');
+    
     if (!video) return;
     
     // 从本地存储恢复播放位置
@@ -308,6 +311,14 @@ function initPlayer() {
     video.addEventListener('ended', function() {
         localStorage.removeItem(`video_pos_${video.dataset.videoId}`);
     });
+    
+    // 移动端全屏按钮点击事件
+    if (mobileFullscreenBtn) {
+        mobileFullscreenBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            toggleMobileFullscreen(video, playerWrapper, this);
+        });
+    }
     
     // 键盘快捷键
     document.addEventListener('keydown', function(e) {
@@ -344,30 +355,245 @@ function initPlayer() {
                 video.muted = !video.muted;
                 break;
             case 'escape':  // ESC - 退出全屏
-                if (document.fullscreenElement) {
-                    document.exitFullscreen();
+                if (isFullscreen()) {
+                    exitFullscreen();
                 }
                 break;
         }
     });
     
     // 双击全屏
-    video.addEventListener('dblclick', toggleFullscreen);
+    video.addEventListener('dblclick', function() {
+        toggleFullscreen();
+    });
+    
+    // 监听全屏状态变化
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
 }
 
 /**
- * 全屏切换
+ * 移动端全屏切换
+ */
+function toggleMobileFullscreen(video, playerWrapper, button) {
+    const isCurrentlyFullscreen = playerWrapper.classList.contains('fullscreen-active');
+    
+    if (isCurrentlyFullscreen) {
+        // 退出全屏
+        exitMobileFullscreen(playerWrapper, button);
+    } else {
+        // 进入全屏
+        enterMobileFullscreen(video, playerWrapper, button);
+    }
+}
+
+/**
+ * 进入移动端全屏
+ */
+function enterMobileFullscreen(video, playerWrapper, button) {
+    // iOS Safari: 使用 webkitEnterFullscreen
+    if (video.webkitEnterFullscreen) {
+        try {
+            // iOS 原生全屏
+            video.webkitEnterFullscreen();
+            
+            // 尝试锁定横屏（如果支持）
+            lockLandscapeOrientation();
+            
+            // 更新按钮图标
+            if (button) {
+                button.innerHTML = '<i class="bi bi-fullscreen-exit"></i>';
+            }
+            
+            return;
+        } catch (err) {
+            console.log('iOS webkitEnterFullscreen 失败:', err);
+        }
+    }
+    
+    // Android Chrome / 其他浏览器: 使用标准 requestFullscreen
+    if (playerWrapper.requestFullscreen) {
+        playerWrapper.requestFullscreen().then(() => {
+            playerWrapper.classList.add('fullscreen-active');
+            
+            // 尝试锁定横屏
+            lockLandscapeOrientation();
+            
+            // 更新按钮图标
+            if (button) {
+                button.innerHTML = '<i class="bi bi-fullscreen-exit"></i>';
+            }
+        }).catch(err => {
+            console.log('标准 requestFullscreen 失败:', err);
+            // 降级到 CSS 全屏
+            fallbackFullscreen(playerWrapper, button);
+        });
+    } else if (playerWrapper.webkitRequestFullscreen) {
+        // 旧版 Chrome/Safari
+        playerWrapper.webkitRequestFullscreen();
+        playerWrapper.classList.add('fullscreen-active');
+        lockLandscapeOrientation();
+        if (button) {
+            button.innerHTML = '<i class="bi bi-fullscreen-exit"></i>';
+        }
+    } else if (playerWrapper.mozRequestFullScreen) {
+        // Firefox
+        playerWrapper.mozRequestFullScreen();
+        playerWrapper.classList.add('fullscreen-active');
+        lockLandscapeOrientation();
+        if (button) {
+            button.innerHTML = '<i class="bi bi-fullscreen-exit"></i>';
+        }
+    } else if (playerWrapper.msRequestFullscreen) {
+        // IE/Edge
+        playerWrapper.msRequestFullscreen();
+        playerWrapper.classList.add('fullscreen-active');
+        lockLandscapeOrientation();
+        if (button) {
+            button.innerHTML = '<i class="bi bi-fullscreen-exit"></i>';
+        }
+    } else {
+        // 都不支持，使用 CSS 降级方案
+        fallbackFullscreen(playerWrapper, button);
+    }
+}
+
+/**
+ * 退出移动端全屏
+ */
+function exitMobileFullscreen(playerWrapper, button) {
+    // 先尝试退出原生全屏
+    if (isFullscreen()) {
+        exitFullscreen();
+    }
+    
+    // 移除 CSS 全屏类
+    playerWrapper.classList.remove('fullscreen-active');
+    
+    // 尝试解锁屏幕方向
+    unlockOrientation();
+    
+    // 更新按钮图标
+    if (button) {
+        button.innerHTML = '<i class="bi bi-arrows-fullscreen"></i>';
+    }
+}
+
+/**
+ * CSS 降级全屏方案
+ */
+function fallbackFullscreen(playerWrapper, button) {
+    playerWrapper.classList.add('fullscreen-active');
+    
+    // 尝试锁定横屏
+    lockLandscapeOrientation();
+    
+    // 更新按钮图标
+    if (button) {
+        button.innerHTML = '<i class="bi bi-fullscreen-exit"></i>';
+    }
+    
+    console.log('使用 CSS 降级全屏方案');
+}
+
+/**
+ * 锁定横屏方向
+ */
+function lockLandscapeOrientation() {
+    if (screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock('landscape').then(() => {
+            console.log('屏幕已锁定为横屏');
+        }).catch(err => {
+            console.log('无法锁定屏幕方向:', err);
+        });
+    }
+}
+
+/**
+ * 解锁屏幕方向
+ */
+function unlockOrientation() {
+    if (screen.orientation && screen.orientation.unlock) {
+        screen.orientation.unlock();
+        console.log('屏幕方向已解锁');
+    }
+}
+
+/**
+ * 检查是否处于全屏状态
+ */
+function isFullscreen() {
+    return !!(document.fullscreenElement || 
+              document.webkitFullscreenElement || 
+              document.mozFullScreenElement || 
+              document.msFullscreenElement);
+}
+
+/**
+ * 退出全屏
+ */
+function exitFullscreen() {
+    if (document.exitFullscreen) {
+        document.exitFullscreen();
+    } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+    } else if (document.mozCancelFullScreen) {
+        document.mozCancelFullScreen();
+    } else if (document.msExitFullscreen) {
+        document.msExitFullscreen();
+    }
+}
+
+/**
+ * 处理全屏状态变化
+ */
+function handleFullscreenChange() {
+    const playerWrapper = document.getElementById('playerWrapper');
+    const mobileFullscreenBtn = document.getElementById('mobileFullscreenBtn');
+    
+    if (!isFullscreen()) {
+        // 退出全屏时
+        if (playerWrapper) {
+            playerWrapper.classList.remove('fullscreen-active');
+        }
+        
+        // 解锁屏幕方向
+        unlockOrientation();
+        
+        // 更新按钮图标
+        if (mobileFullscreenBtn) {
+            mobileFullscreenBtn.innerHTML = '<i class="bi bi-arrows-fullscreen"></i>';
+        }
+    }
+}
+
+/**
+ * 全屏切换（桌面端使用）
  */
 function toggleFullscreen() {
-    const container = document.querySelector('.video-wrapper');
-    if (!container) return;
+    const playerWrapper = document.getElementById('playerWrapper');
+    const video = document.getElementById('videoPlayer');
+    const mobileFullscreenBtn = document.getElementById('mobileFullscreenBtn');
     
-    if (document.fullscreenElement) {
-        document.exitFullscreen();
+    if (!playerWrapper) return;
+    
+    if (isFullscreen()) {
+        exitFullscreen();
     } else {
-        container.requestFullscreen().catch(err => {
-            console.log('全屏请求失败:', err);
-        });
+        // 优先使用标准 API
+        if (playerWrapper.requestFullscreen) {
+            playerWrapper.requestFullscreen().catch(err => {
+                console.log('全屏请求失败:', err);
+            });
+        } else if (playerWrapper.webkitRequestFullscreen) {
+            playerWrapper.webkitRequestFullscreen();
+        } else if (playerWrapper.mozRequestFullScreen) {
+            playerWrapper.mozRequestFullScreen();
+        } else if (playerWrapper.msRequestFullscreen) {
+            playerWrapper.msRequestFullscreen();
+        }
     }
 }
 

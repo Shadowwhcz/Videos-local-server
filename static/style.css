@@ -61,6 +61,11 @@
 
 html {
     scroll-behavior: smooth;
+    overflow-x: hidden;
+    /* 防止iOS弹性滚动导致的水平滚动 */
+    overflow-y: auto;
+    /* iOS平滑滚动 */
+    -webkit-overflow-scrolling: touch;
 }
 
 body {
@@ -74,6 +79,11 @@ body {
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* 防止水平滚动 */
+    overflow-x: hidden;
+    /* 使用原生滚动 */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 /* 粒子背景 */
@@ -495,13 +505,29 @@ body {
     
     /* 默认 - 移动端优先 */
     grid-template-columns: repeat(2, 1fr);
+    
+    /* 确保不溢出 */
+    width: 100%;
+    max-width: 100%;
+}
+
+/* iPhone 13/14 (390px - 393px) 和小屏手机专用适配 */
+@media (max-width: 413.98px) {
+    .video-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.5rem;
+        /* 确保网格占满宽度不溢出 */
+        width: calc(100% + 0.5rem);
+        margin-left: -0.25rem;
+        margin-right: -0.25rem;
+    }
 }
 
 /* 大屏手机 (iPhone 13/14 Pro Max: 428px) */
 @media (min-width: 414px) and (max-width: 475.98px) {
     .video-grid {
         grid-template-columns: repeat(2, 1fr);
-        gap: 1rem;
+        gap: 0.75rem;
     }
 }
 
@@ -556,6 +582,13 @@ body {
    视频卡片
    ============================================ */
 
+.video-card-wrapper {
+    /* 防止卡片溢出 */
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+}
+
 .video-card {
     background: var(--bg-card);
     border-radius: var(--radius-lg);
@@ -566,6 +599,9 @@ body {
     text-decoration: none;
     display: block;
     position: relative;
+    /* 确保卡片不溢出 */
+    width: 100%;
+    max-width: 100%;
 }
 
 .video-card:hover {
@@ -1319,7 +1355,7 @@ body {
 /* 移动端 - 手机竖屏 (< 576px) */
 @media (max-width: 575.98px) {
     .container {
-        padding: 0 0.75rem;
+        padding: 0 0.5rem;
     }
     
     .navbar {
@@ -1362,7 +1398,11 @@ body {
     
     .video-grid {
         grid-template-columns: repeat(2, 1fr);
-        gap: 0.75rem;
+        gap: 0.5rem;
+        /* 抵消container padding，让视频卡片占满 */
+        width: calc(100% + 1rem);
+        margin-left: -0.5rem;
+        margin-right: -0.5rem;
     }
     
     .video-info {

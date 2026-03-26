@@ -189,6 +189,100 @@
         video {
             -webkit-transform: translateZ(0);
         }
+        
+        /* 移动端自定义全屏按钮 */
+        .mobile-fullscreen-btn {
+            position: absolute;
+            bottom: 60px;
+            right: 15px;
+            width: 44px;
+            height: 44px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 2px solid rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 10;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+        
+        .mobile-fullscreen-btn i {
+            color: white;
+            font-size: 20px;
+        }
+        
+        .mobile-fullscreen-btn:hover,
+        .mobile-fullscreen-btn:active {
+            background: rgba(0, 0, 0, 0.85);
+            transform: scale(1.1);
+        }
+        
+        /* 移动端显示自定义按钮 */
+        @media (max-width: 767.98px) {
+            .mobile-fullscreen-btn {
+                display: flex;
+            }
+        }
+        
+        /* 大屏手机竖屏优化 */
+        @media (min-width: 414px) and (max-width: 475.98px) {
+            .mobile-fullscreen-btn {
+                width: 48px;
+                height: 48px;
+                bottom: 70px;
+                right: 18px;
+            }
+            
+            .mobile-fullscreen-btn i {
+                font-size: 22px;
+            }
+        }
+        
+        /* 全屏模式样式 */
+        .player-wrapper.fullscreen-active {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 9999;
+            background: #000;
+            border-radius: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .player-wrapper.fullscreen-active video {
+            max-height: 100vh;
+            max-width: 100vw;
+            width: auto;
+            height: auto;
+        }
+        
+        /* 全屏时隐藏返回按钮和信息面板 */
+        .player-wrapper.fullscreen-active ~ .back-btn,
+        .player-wrapper.fullscreen-active ~ .video-panel,
+        .player-wrapper.fullscreen-active ~ *:not(#particles-js) {
+            display: none !important;
+        }
+        
+        /* 全屏时的自定义按钮位置调整 */
+        .player-wrapper.fullscreen-active .mobile-fullscreen-btn {
+            bottom: 20px;
+            right: 20px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .player-wrapper.fullscreen-active:hover .mobile-fullscreen-btn,
+        .player-wrapper.fullscreen-active.show-controls .mobile-fullscreen-btn {
+            opacity: 1;
+        }
     </style>
     
     <!-- Particles.js -->
@@ -206,17 +300,25 @@
         </a>
         
         <!-- Video Player -->
-        <div class="player-wrapper">
+        <div class="player-wrapper" id="playerWrapper">
             <video id="videoPlayer" 
                    data-video-id="{{ video.id }}"
                    controls 
                    autoplay 
                    playsinline
+                   webkit-playsinline
+                   x5-video-player-type="h5"
+                   x5-video-player-fullscreen="true"
                    preload="metadata"
                    poster="/static/poster.png">
                 <source src="/stream/{{ video.id }}" type="video/{{ video.ext|lower }}">
                 您的浏览器不支持视频播放，请使用现代浏览器。
             </video>
+            
+            <!-- 移动端自定义全屏按钮 -->
+            <button class="mobile-fullscreen-btn" id="mobileFullscreenBtn" aria-label="全屏">
+                <i class="bi bi-arrows-fullscreen"></i>
+            </button>
         </div>
         
         <!-- Video Info Panel -->
