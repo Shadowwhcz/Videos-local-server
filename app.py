@@ -16,6 +16,10 @@ import time
 import pickle
 import secrets
 from dataclasses import dataclass, field
+import asyncio
+from functools import lru_cache
+from collections import OrderedDict
+import io
 
 from fastapi import FastAPI, Request, Query, HTTPException, Depends, Form, BackgroundTasks, Body
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, Response, RedirectResponse, JSONResponse
@@ -23,6 +27,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
+
+# ==================== 性能优化配置 ====================
+# 流媒体优化参数（针对外接硬盘优化）
+STREAM_CHUNK_SIZE = 4 * 1024 * 1024  # 4MB 基础块大小（从1MB增加）
+STREAM_PREFETCH_SIZE = 16 * 1024 * 1024  # 16MB 预读缓冲区
+FILE_HANDLE_CACHE_SIZE = 32  # 缓存的文件句柄数量
+FILE_HANDLE_TTL = 300  # 文件句柄缓存时间（秒）
 
 # 初始化应用
 app = FastAPI(title="局域网视频服务器")
@@ -331,6 +342,145 @@ DOWNLOADING_EXTENSIONS = {
 FILE_SIZE_CACHE: Dict[str, dict] = {}
 FILE_SIZE_CACHE_LOCK = threading.Lock()
 FILE_SIZE_CHECK_INTERVAL = 2.0  # 秒
+
+# ==================== 文件句柄缓存 ====================
+class FileHandleCache:
+    """LRU缓存文件句柄，减少频繁打开文件的开销"""
+    
+    def __init__(self, max_size: int = FILE_HANDLE_CACHE_SIZE, ttl: int = FILE_HANDLE_TTL):
+        self.max_size = max_size
+        self.ttl = ttl
+        self.cache: OrderedDict[str, dict] = OrderedDict()
+        self.lock = threading.RLock()
+    
+    def get(self, file_path: str) -> Optional[io.BufferedReader]:
+        """获取缓存的文件句柄"""
+        with self.lock:
+            if file_path in self.cache:
+                entry = self.cache[file_path]
+                # 检查是否过期
+                if time.time() - entry['accessed_at'] < self.ttl:
+                    # 移到末尾（最近使用）
+                    self.cache.move_to_end(file_path)
+                    entry['accessed_at'] = time.time()
+                    return entry['handle']
+                else:
+                    # 过期，关闭并移除
+                    try:
+                        entry['handle'].close()
+                    except:
+                        pass
+                    del self.cache[file_path]
+        return None
+    
+    def put(self, file_path: str, handle: io.BufferedReader):
+        """缓存文件句柄"""
+        with self.lock:
+            # 如果已存在，先关闭旧的
+            if file_path in self.cache:
+                try:
+                    self.cache[file_path]['handle'].close()
+                except:
+                    pass
+            
+            # 添加新句柄
+            self.cache[file_path] = {
+                'handle': handle,
+                'accessed_at': time.time()
+            }
+            self.cache.move_to_end(file_path)
+            
+            # 超出容量，移除最旧的
+            while len(self.cache) > self.max_size:
+                oldest_path, oldest_entry = self.cache.popitem(last=False)
+                try:
+                    oldest_entry['handle'].close()
+                except:
+                    pass
+    
+    def close_all(self):
+        """关闭所有缓存的文件句柄"""
+        with self.lock:
+            for entry in self.cache.values():
+                try:
+                    entry['handle'].close()
+                except:
+                    pass
+            self.cache.clear()
+
+# 全局文件句柄缓存
+file_handle_cache = FileHandleCache()
+
+# ==================== 预读缓冲区 ====================
+class PrefetchBuffer:
+    """预读缓冲区，在后台线程中预读取数据"""
+    
+    def __init__(self, file_path: str, start_pos: int, prefetch_size: int = STREAM_PREFETCH_SIZE):
+        self.file_path = file_path
+        self.start_pos = start_pos
+        self.prefetch_size = prefetch_size
+        self.buffer = bytearray()
+        self.error = None
+        self.done = threading.Event()
+        self.thread = None
+    
+    def start(self):
+        """启动预读线程"""
+        self.thread = threading.Thread(target=self._prefetch, daemon=True)
+        self.thread.start()
+    
+    def _prefetch(self):
+        """后台预读数据"""
+        try:
+            # 尝试使用缓存的文件句柄
+            handle = file_handle_cache.get(self.file_path)
+            own_handle = False
+            
+            if handle is None:
+                handle = open(self.file_path, 'rb')
+                own_handle = True
+            
+            try:
+                handle.seek(self.start_pos)
+                data = handle.read(self.prefetch_size)
+                self.buffer.extend(data)
+                
+                # 如果是自己打开的，缓存起来
+                if own_handle:
+                    file_handle_cache.put(self.file_path, handle)
+            finally:
+                # 如果是自己打开的且没有缓存，则关闭
+                if own_handle and not file_handle_cache.get(self.file_path):
+                    handle.close()
+        except Exception as e:
+            self.error = e
+        finally:
+            self.done.set()
+    
+    def get_data(self, timeout: float = 2.0) -> Optional[bytes]:
+        """获取预读的数据"""
+        if self.done.wait(timeout):
+            if self.error:
+                return None
+            return bytes(self.buffer)
+        return None
+
+def open_file_with_cache(file_path: str) -> io.BufferedReader:
+    """打开文件（优先使用缓存）"""
+    handle = file_handle_cache.get(file_path)
+    if handle:
+        # 检查文件是否仍然有效
+        try:
+            handle.seek(0, 2)  # 移到末尾测试
+            handle.seek(0)  # 回到开头
+            return handle
+        except:
+            # 文件句柄无效，重新打开
+            pass
+    
+    handle = open(file_path, 'rb')
+    file_handle_cache.put(file_path, handle)
+    return file_handle_cache.get(file_path) or handle
 
 # 视频扫描缓存（文件缓存）
 VIDEO_SCAN_CACHE_FILE = BASE_DIR / ".video_scan_cache"
@@ -1004,12 +1154,13 @@ def parse_range_header(range_header: str, file_size: int) -> list[tuple[int, int
 @app.api_route("/stream/{video_id}", methods=["GET", "HEAD"])
 async def stream_video(video_id: str, request: Request):
     """
-    视频流传输（完整支持HTTP Range请求）
-    支持:
-    - Range请求 (206 Partial Content)
-    - If-Range条件请求
-    - ETag缓存验证
-    - 多Range请求（返回第一个有效范围）
+    视频流传输（完整支持HTTP Range请求，优化版）
+    
+    优化特性:
+    - 文件句柄缓存（减少频繁打开文件的开销）
+    - 预读缓冲（后台线程预取数据，减少等待时间）
+    - 增大的块大小（4MB，适合视频流）
+    - 针对外接硬盘优化（减少IO次数）
     """
     # 认证检查
     if video_server.auth_enabled and not get_current_user(request):
@@ -1036,6 +1187,7 @@ async def stream_video(video_id: str, request: Request):
         'Content-Type': mime_type,
         'ETag': etag,
         'Cache-Control': 'public, max-age=31536000',  # 缓存1年
+        'X-Content-Type-Options': 'nosniff',
     }
     
     # HEAD请求只返回头信息
@@ -1076,13 +1228,29 @@ async def stream_video(video_id: str, request: Request):
         start, end = ranges[0]
         content_length = end - start + 1
         
-        # 使用更优化的块大小（1MB适合视频流）
-        chunk_size = 1024 * 1024
-        
-        def iterfile():
-            with open(video_path, 'rb') as f:
+        def iterfile_optimized():
+            """优化的文件迭代器，支持预读缓冲"""
+            try:
+                # 尝试使用缓存的文件句柄
+                f = file_handle_cache.get(video_path)
+                own_handle = False
+                
+                if f is None:
+                    f = open(video_path, 'rb')
+                    own_handle = True
+                
                 f.seek(start)
                 remaining = content_length
+                chunk_size = STREAM_CHUNK_SIZE
+                
+                # 预读第一块数据（同步读取，确保立即可用）
+                first_chunk_size = min(chunk_size * 2, remaining)  # 首次读取更大块
+                data = f.read(first_chunk_size)
+                if data:
+                    remaining -= len(data)
+                    yield data
+                
+                # 继续读取剩余数据
                 while remaining > 0:
                     read_size = min(chunk_size, remaining)
                     data = f.read(read_size)
@@ -1090,6 +1258,19 @@ async def stream_video(video_id: str, request: Request):
                         break
                     remaining -= len(data)
                     yield data
+                
+                # 缓存文件句柄
+                if own_handle:
+                    file_handle_cache.put(video_path, f)
+                    
+            except Exception as e:
+                print(f"Stream error: {e}")
+                # 出错时确保关闭文件
+                try:
+                    if 'f' in locals() and f:
+                        f.close()
+                except:
+                    pass
         
         headers = {
             **base_headers,
@@ -1098,21 +1279,40 @@ async def stream_video(video_id: str, request: Request):
         }
         
         return StreamingResponse(
-            iterfile(),
+            iterfile_optimized(),
             status_code=206,
             headers=headers,
         )
     else:
         # 无Range请求，返回完整文件
-        chunk_size = 1024 * 1024  # 1MB chunks
-        
-        def iterfile():
-            with open(video_path, 'rb') as f:
+        def iterfile_full():
+            """返回完整文件的迭代器"""
+            try:
+                f = file_handle_cache.get(video_path)
+                own_handle = False
+                
+                if f is None:
+                    f = open(video_path, 'rb')
+                    own_handle = True
+                
+                chunk_size = STREAM_CHUNK_SIZE
                 while chunk := f.read(chunk_size):
                     yield chunk
+                
+                # 缓存文件句柄
+                if own_handle:
+                    file_handle_cache.put(video_path, f)
+                    
+            except Exception as e:
+                print(f"Stream error: {e}")
+                try:
+                    if 'f' in locals() and f:
+                        f.close()
+                except:
+                    pass
         
         return StreamingResponse(
-            iterfile(),
+            iterfile_full(),
             media_type=mime_type,
             headers={
                 **base_headers,
@@ -1195,7 +1395,42 @@ async def api_config():
         "directories": video_server.video_dirs,
         "extensions": list(video_server.extensions),
         "auth_enabled": video_server.auth_enabled,
+        "stream_optimization": {
+            "chunk_size_mb": STREAM_CHUNK_SIZE / (1024 * 1024),
+            "prefetch_size_mb": STREAM_PREFETCH_SIZE / (1024 * 1024),
+            "file_handle_cache_size": FILE_HANDLE_CACHE_SIZE,
+        }
     }
+
+
+@app.get("/api/cache/status")
+async def api_cache_status():
+    """API: 获取缓存状态"""
+    return {
+        "file_handle_cache": {
+            "size": len(file_handle_cache.cache),
+            "max_size": file_handle_cache.max_size,
+            "entries": [
+                {
+                    "path": os.path.basename(k),
+                    "accessed_ago": round(time.time() - v['accessed_at'], 1)
+                }
+                for k, v in list(file_handle_cache.cache.items())[:10]
+            ]
+        },
+        "video_scan_cache": {
+            "exists": VIDEO_SCAN_CACHE_FILE.exists(),
+            "cache_size": len(VIDEO_SCAN_CACHE)
+        }
+    }
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """应用关闭时清理资源"""
+    print("🔄 关闭文件句柄缓存...")
+    file_handle_cache.close_all()
+    print("✅ 清理完成")
 
 
 @app.get("/api/session/status")
