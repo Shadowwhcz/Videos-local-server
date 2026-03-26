@@ -14,6 +14,8 @@ from urllib.parse import unquote
 import threading
 import time
 import pickle
+import secrets
+from dataclasses import dataclass, field
 
 from fastapi import FastAPI, Request, Query, HTTPException, Depends, Form, BackgroundTasks, Body
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, Response, RedirectResponse, JSONResponse
@@ -30,12 +32,111 @@ _config = configparser.ConfigParser()
 _config.read("config.ini", encoding='utf-8')
 _secret_key = _config.get('auth', 'secret_key', fallback='videoserver-secret-key-change-in-production')
 
-# 添加 Session 中间件
+# ==================== 服务端 Session 管理 ====================
+# 支持同一账号多设备登录，每个设备有独立的 session
+
+@dataclass
+class UserSession:
+    """用户会话信息"""
+    session_id: str
+    username: str
+    created_at: float
+    last_active: float
+    device_info: str = ""
+
+class SessionManager:
+    """服务端 Session 管理器"""
+    
+    def __init__(self, session_expire_hours: int = 24 * 7):  # 默认7天过期
+        self.sessions: Dict[str, UserSession] = {}  # session_id -> UserSession
+        self.user_sessions: Dict[str, List[str]] = {}  # username -> [session_id1, session_id2, ...]
+        self.lock = threading.RLock()
+        self.expire_hours = session_expire_hours
+    
+    def create_session(self, username: str, device_info: str = "") -> str:
+        """创建新会话，返回 session_id"""
+        session_id = secrets.token_urlsafe(32)
+        now = time.time()
+        
+        with self.lock:
+            session = UserSession(
+                session_id=session_id,
+                username=username,
+                created_at=now,
+                last_active=now,
+                device_info=device_info
+            )
+            self.sessions[session_id] = session
+            
+            # 添加到用户的会话列表
+            if username not in self.user_sessions:
+                self.user_sessions[username] = []
+            self.user_sessions[username].append(session_id)
+        
+        return session_id
+    
+    def get_session(self, session_id: str) -> Optional[UserSession]:
+        """获取会话信息"""
+        with self.lock:
+            session = self.sessions.get(session_id)
+            if session:
+                # 检查是否过期
+                if time.time() - session.last_active > self.expire_hours * 3600:
+                    self.delete_session(session_id)
+                    return None
+                # 更新最后活跃时间
+                session.last_active = time.time()
+            return session
+    
+    def delete_session(self, session_id: str):
+        """删除会话"""
+        with self.lock:
+            session = self.sessions.pop(session_id, None)
+            if session:
+                # 从用户的会话列表中移除
+                if session.username in self.user_sessions:
+                    try:
+                        self.user_sessions[session.username].remove(session_id)
+                        if not self.user_sessions[session.username]:
+                            del self.user_sessions[session.username]
+                    except ValueError:
+                        pass
+    
+    def delete_user_sessions(self, username: str):
+        """删除用户的所有会话（登出所有设备）"""
+        with self.lock:
+            session_ids = self.user_sessions.pop(username, [])
+            for sid in session_ids:
+                self.sessions.pop(sid, None)
+    
+    def get_user_session_count(self, username: str) -> int:
+        """获取用户的活跃会话数"""
+        with self.lock:
+            return len(self.user_sessions.get(username, []))
+    
+    def cleanup_expired(self):
+        """清理过期会话"""
+        now = time.time()
+        expired = []
+        
+        with self.lock:
+            for session_id, session in list(self.sessions.items()):
+                if now - session.last_active > self.expire_hours * 3600:
+                    expired.append(session_id)
+        
+        for sid in expired:
+            self.delete_session(sid)
+
+# 全局 Session 管理器
+session_manager = SessionManager()
+
+# 添加 Session 中间件（仅用于存储 session_id）
 app.add_middleware(
     SessionMiddleware,
     secret_key=_secret_key,
-    session_cookie="video_session",
+    session_cookie="video_session_id",
     max_age=60 * 60 * 24 * 7,  # 7天
+    same_site="lax",  # 允许跨站请求但有限制
 )
 
 # 获取项目根目录
@@ -666,7 +767,17 @@ def get_mime_type(file_path: str) -> str:
 
 def get_current_user(request: Request) -> Optional[str]:
     """获取当前登录用户"""
-    return request.session.get("user")
+    session_id = request.session.get("session_id")
+    if not session_id:
+        return None
+    
+    session = session_manager.get_session(session_id)
+    if not session:
+        # Session 已过期或无效，清除 cookie
+        request.session.clear()
+        return None
+    
+    return session.username
 
 
 def require_auth(request: Request):
@@ -704,9 +815,20 @@ async def login(
 ):
     """处理登录"""
     if username == video_server.auth_username and password == video_server.auth_password:
-        request.session["user"] = username
+        # 获取设备信息（User-Agent）
+        device_info = request.headers.get("user-agent", "Unknown")[:200]
+        
+        # 创建服务端会话
+        session_id = session_manager.create_session(username, device_info)
+        
+        # 在 cookie 中只存储 session_id
+        request.session["session_id"] = session_id
+        
+        print(f"✅ 用户 {username} 登录成功，当前活跃会话数: {session_manager.get_user_session_count(username)}")
+        
         return RedirectResponse(url="/", status_code=302)
     
+    print(f"❌ 登录失败: 用户名={username}")
     return templates.TemplateResponse(
         "login.html",
         {"request": request, "error": "用户名或密码错误"}
@@ -715,7 +837,15 @@ async def login(
 
 @app.get("/logout")
 async def logout(request: Request):
-    """登出"""
+    """登出当前设备"""
+    session_id = request.session.get("session_id")
+    if session_id:
+        session = session_manager.get_session(session_id)
+        if session:
+            username = session.username
+            session_manager.delete_session(session_id)
+            print(f"👋 用户 {username} 登出，剩余活跃会话数: {session_manager.get_user_session_count(username)}")
+    
     request.session.clear()
     return RedirectResponse(url="/login", status_code=302)
 
@@ -1065,6 +1195,96 @@ async def api_config():
         "directories": video_server.video_dirs,
         "extensions": list(video_server.extensions),
         "auth_enabled": video_server.auth_enabled,
+    }
+
+
+@app.get("/api/session/status")
+async def api_session_status(request: Request):
+    """API: 获取当前会话状态"""
+    if not video_server.auth_enabled:
+        return {"auth_enabled": False, "logged_in": True, "username": "guest"}
+    
+    session_id = request.session.get("session_id")
+    if not session_id:
+        return {"auth_enabled": True, "logged_in": False}
+    
+    session = session_manager.get_session(session_id)
+    if not session:
+        return {"auth_enabled": True, "logged_in": False}
+    
+    return {
+        "auth_enabled": True,
+        "logged_in": True,
+        "username": session.username,
+        "session_id": session.session_id[:8] + "...",  # 只显示前8位
+        "created_at": datetime.fromtimestamp(session.created_at).strftime('%Y-%m-%d %H:%M:%S'),
+        "last_active": datetime.fromtimestamp(session.last_active).strftime('%Y-%m-%d %H:%M:%S'),
+        "active_sessions": session_manager.get_user_session_count(session.username),
+    }
+
+
+@app.get("/api/session/sessions")
+async def api_list_sessions(request: Request):
+    """API: 列出当前用户的所有活跃会话（需要登录）"""
+    if not video_server.auth_enabled:
+        raise HTTPException(status_code=400, detail="认证未启用")
+    
+    session_id = request.session.get("session_id")
+    if not session_id:
+        raise HTTPException(status_code=401, detail="未登录")
+    
+    current_session = session_manager.get_session(session_id)
+    if not current_session:
+        raise HTTPException(status_code=401, detail="会话已过期")
+    
+    username = current_session.username
+    sessions_info = []
+    
+    with session_manager.lock:
+        user_session_ids = session_manager.user_sessions.get(username, [])
+        for sid in user_session_ids:
+            sess = session_manager.sessions.get(sid)
+            if sess:
+                sessions_info.append({
+                    "session_id": sess.session_id[:8] + "...",
+                    "created_at": datetime.fromtimestamp(sess.created_at).strftime('%Y-%m-%d %H:%M:%S'),
+                    "last_active": datetime.fromtimestamp(sess.last_active).strftime('%Y-%m-%d %H:%M:%S'),
+                    "device_info": sess.device_info[:50] + "..." if len(sess.device_info) > 50 else sess.device_info,
+                    "is_current": sess.session_id == session_id,
+                })
+    
+    return {
+        "username": username,
+        "total_sessions": len(sessions_info),
+        "sessions": sessions_info,
+    }
+
+
+@app.post("/api/session/logout_all")
+async def api_logout_all_sessions(request: Request):
+    """API: 登出所有设备"""
+    if not video_server.auth_enabled:
+        raise HTTPException(status_code=400, detail="认证未启用")
+    
+    session_id = request.session.get("session_id")
+    if not session_id:
+        raise HTTPException(status_code=401, detail="未登录")
+    
+    current_session = session_manager.get_session(session_id)
+    if not current_session:
+        raise HTTPException(status_code=401, detail="会话已过期")
+    
+    username = current_session.username
+    session_count = session_manager.get_user_session_count(username)
+    
+    # 删除所有会话
+    session_manager.delete_user_sessions(username)
+    
+    request.session.clear()
+    
+    return {
+        "success": True,
+        "message": f"已登出所有设备（共 {session_count} 个会话）",
     }
 
 
