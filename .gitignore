@@ -32,3 +32,9 @@ logs/
 *.tmp
 *.temp
 .cache/
+
+# Video scan cache
+.video_scan_cache
+
+# Thumbnails (generated)
+thumbnails/

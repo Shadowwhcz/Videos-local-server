@@ -2,15 +2,42 @@
  * 视频服务器前端脚本
  */
 
+// 全局配置
+let appConfig = {
+    authEnabled: false
+};
+
+// 待检查的视频ID列表
+let pendingVideos = [];
+let pollInterval = null;
+
 document.addEventListener('DOMContentLoaded', function() {
     // 初始化所有功能
-    initSearch();
-    initVideoCards();
-    initThumbnails();
-    initVideoPreview();
-    initVideoDurations();
-    initPlayer();
+    initConfig().then(() => {
+        initSearch();
+        initVideoCards();
+        initThumbnails();
+        initVideoPreview();
+        initVideoDurations();
+        initPlayer();
+        initDeleteButtons();
+        initAutoIntegrityCheck();
+    });
 });
+
+/**
+ * 加载配置
+ */
+async function initConfig() {
+    try {
+        const response = await fetch('/api/config');
+        if (response.ok) {
+            appConfig = await response.json();
+        }
+    } catch (e) {
+        console.log('无法加载配置');
+    }
+}
 
 /**
  * 搜索框交互
@@ -32,9 +59,29 @@ function initSearch() {
 function initVideoCards() {
     document.querySelectorAll('.video-card').forEach(card => {
         card.addEventListener('click', function(e) {
-            // 不阻止默认行为，让链接正常跳转
+            // 如果是损坏视频，阻止跳转
+            const wrapper = this.closest('.video-card-wrapper');
+            if (wrapper && wrapper.classList.contains('corrupted')) {
+                e.preventDefault();
+                showCorruptedAlert(wrapper.dataset.videoName);
+                return false;
+            }
         });
     });
+}
+
+/**
+ * 显示损坏视频提示
+ */
+function showCorruptedAlert(videoName) {
+    const modal = document.getElementById('corruptedAlertModal');
+    if (modal) {
+        const nameEl = modal.querySelector('.corrupted-video-name');
+        if (nameEl) nameEl.textContent = videoName;
+        modal.classList.add('show');
+    } else {
+        alert(`视频 "${videoName}" 已损坏，无法播放`);
+    }
 }
 
 /**
@@ -85,14 +132,18 @@ function initThumbnails() {
  * 视频预览（悬停播放）
  */
 function initVideoPreview() {
-    const videoCards = document.querySelectorAll('.video-card');
+    const videoCards = document.querySelectorAll('.video-card-wrapper');
     
-    videoCards.forEach(card => {
-        const previewContainer = card.querySelector('.video-preview');
+    videoCards.forEach(wrapper => {
+        const card = wrapper.querySelector('.video-card');
+        const previewContainer = card?.querySelector('.video-preview');
         const video = previewContainer?.querySelector('video');
-        const thumbnail = card.querySelector('.video-thumbnail');
+        const thumbnail = card?.querySelector('.video-thumbnail');
         
         if (!previewContainer || !video) return;
+        
+        // 损坏视频不启用预览
+        if (wrapper.classList.contains('corrupted')) return;
         
         let loaded = false;
         let loadPromise = null;
@@ -259,15 +310,6 @@ function initPlayer() {
     
     // 双击全屏
     video.addEventListener('dblclick', toggleFullscreen);
-    
-    // 显示播放进度提示
-    let progressTimeout;
-    function showProgress() {
-        const percent = (video.currentTime / video.duration * 100).toFixed(1);
-        console.log(`播放进度: ${percent}%`);
-    }
-    
-    video.addEventListener('seeked', showProgress);
 }
 
 /**
@@ -309,3 +351,300 @@ function cleanExpiredCache() {
 
 // 页面加载时清理过期缓存
 cleanExpiredCache();
+
+// ==================== 删除功能 ====================
+
+/**
+ * 初始化删除按钮
+ */
+function initDeleteButtons() {
+    document.querySelectorAll('.video-delete-btn').forEach(btn => {
+        btn.addEventListener('click', async function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const videoId = this.dataset.videoId;
+            const videoName = this.dataset.videoName;
+            
+            if (!videoId) return;
+            
+            // 显示确认弹窗
+            showDeleteConfirm(videoId, videoName, this);
+        });
+    });
+}
+
+/**
+ * 显示删除确认弹窗
+ */
+function showDeleteConfirm(videoId, videoName, buttonEl) {
+    // 检查是否已有弹窗
+    let modal = document.getElementById('deleteModal');
+    if (!modal) {
+        modal = createDeleteModal();
+        document.body.appendChild(modal);
+    }
+    
+    const nameEl = modal.querySelector('.delete-modal-filename');
+    const confirmBtn = modal.querySelector('.btn-confirm-delete');
+    const cancelBtn = modal.querySelector('.btn-cancel-delete');
+    
+    if (nameEl) nameEl.textContent = videoName;
+    
+    // 确认删除
+    const handleConfirm = async () => {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>删除中...';
+        
+        try {
+            const response = await fetch(`/api/video/${videoId}`, {
+                method: 'DELETE'
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                // 移除视频卡片
+                const wrapper = buttonEl.closest('.video-card-wrapper');
+                if (wrapper) {
+                    wrapper.style.transform = 'scale(0.8)';
+                    wrapper.style.opacity = '0';
+                    setTimeout(() => wrapper.remove(), 300);
+                }
+                closeModal(modal);
+            } else {
+                alert(result.detail || '删除失败');
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = '确认删除';
+            }
+        } catch (err) {
+            alert('删除失败: ' + err.message);
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = '确认删除';
+        }
+    };
+    
+    // 取消
+    const handleCancel = () => {
+        closeModal(modal);
+    };
+    
+    // 绑定事件（先移除旧的）
+    confirmBtn.replaceWith(confirmBtn.cloneNode(true));
+    cancelBtn.replaceWith(cancelBtn.cloneNode(true));
+    
+    modal.querySelector('.btn-confirm-delete').addEventListener('click', handleConfirm);
+    modal.querySelector('.btn-cancel-delete').addEventListener('click', handleCancel);
+    
+    // 显示弹窗
+    modal.classList.add('show');
+}
+
+/**
+ * 创建删除确认弹窗
+ */
+function createDeleteModal() {
+    const modal = document.createElement('div');
+    modal.id = 'deleteModal';
+    modal.className = 'delete-modal';
+    modal.innerHTML = `
+        <div class="delete-modal-content">
+            <div class="delete-modal-icon">
+                <i class="bi bi-trash3"></i>
+            </div>
+            <h3>确认删除视频</h3>
+            <p>确定要删除以下视频吗？<br><span class="delete-modal-filename"></span></p>
+            <p style="color: #ef4444; font-size: 0.8rem; margin-top: -0.5rem;">此操作无法撤销</p>
+            <div class="delete-modal-actions">
+                <button class="btn btn-secondary btn-cancel-delete">取消</button>
+                <button class="btn btn-danger btn-confirm-delete">确认删除</button>
+            </div>
+        </div>
+    `;
+    
+    // 点击背景关闭
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeModal(modal);
+        }
+    });
+    
+    return modal;
+}
+
+/**
+ * 关闭弹窗
+ */
+function closeModal(modal) {
+    modal.classList.remove('show');
+}
+
+// ==================== 自动完整性检查 ====================
+
+/**
+ * 初始化自动完整性检查
+ */
+function initAutoIntegrityCheck() {
+    const videoWrappers = document.querySelectorAll('.video-card-wrapper');
+    if (videoWrappers.length === 0) return;
+    
+    // 收集所有视频ID
+    const videoIds = [];
+    videoWrappers.forEach(wrapper => {
+        const videoId = wrapper.dataset.videoId;
+        if (videoId) videoIds.push(videoId);
+    });
+    
+    if (videoIds.length === 0) return;
+    
+    // 批量检查完整性
+    batchCheckIntegrity(videoIds);
+}
+
+/**
+ * 批量检查视频完整性
+ */
+async function batchCheckIntegrity(videoIds) {
+    try {
+        const response = await fetch('/api/videos/integrity/batch', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ video_ids: videoIds })
+        });
+        
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        
+        // 更新已缓存的结果
+        if (data.results) {
+            Object.entries(data.results).forEach(([videoId, result]) => {
+                updateVideoCard(videoId, result);
+            });
+        }
+        
+        // 如果有待检查的视频，启动轮询
+        if (data.pending && data.pending.length > 0) {
+            pendingVideos = data.pending;
+            startPolling();
+        }
+        
+    } catch (err) {
+        console.log('完整性检查失败:', err);
+    }
+}
+
+/**
+ * 开始轮询检查结果
+ */
+function startPolling() {
+    if (pollInterval) return;
+    
+    pollInterval = setInterval(async () => {
+        if (pendingVideos.length === 0) {
+            stopPolling();
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/videos/integrity/status?video_ids=${pendingVideos.join(',')}`);
+            if (!response.ok) return;
+            
+            const data = await response.json();
+            
+            if (data.results) {
+                Object.entries(data.results).forEach(([videoId, result]) => {
+                    updateVideoCard(videoId, result);
+                    // 从待检查列表移除
+                    pendingVideos = pendingVideos.filter(id => id !== videoId);
+                });
+            }
+        } catch (err) {
+            console.log('轮询失败:', err);
+        }
+    }, 2000); // 每2秒轮询一次
+}
+
+/**
+ * 停止轮询
+ */
+function stopPolling() {
+    if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+    }
+}
+
+/**
+ * 更新视频卡片显示
+ */
+function updateVideoCard(videoId, result) {
+    const wrapper = document.querySelector(`.video-card-wrapper[data-video-id="${videoId}"]`);
+    if (!wrapper) return;
+    
+    if (result.valid === false) {
+        // 标记为损坏
+        wrapper.classList.add('corrupted');
+        
+        // 替换缩略图为损坏占位图
+        const thumb = wrapper.querySelector('.video-thumb');
+        if (thumb && !thumb.querySelector('.corrupted-placeholder')) {
+            // 移除原有内容
+            const thumbnail = thumb.querySelector('.video-thumbnail');
+            const preview = thumb.querySelector('.video-preview');
+            const playOverlay = thumb.querySelector('.play-overlay');
+            
+            if (thumbnail) thumbnail.style.display = 'none';
+            if (preview) preview.style.display = 'none';
+            if (playOverlay) playOverlay.style.display = 'none';
+            
+            // 添加损坏占位图
+            const placeholder = document.createElement('div');
+            placeholder.className = 'corrupted-placeholder';
+            placeholder.innerHTML = `
+                <div class="corrupted-icon">
+                    <i class="bi bi-file-earmark-x"></i>
+                </div>
+                <div class="corrupted-text">
+                    视频已损坏
+                    <small>${result.error || '无法播放'}</small>
+                </div>
+            `;
+            thumb.appendChild(placeholder);
+        }
+    }
+}
+
+/**
+ * 检查所有视频按钮（可选功能）
+ */
+function initIntegrityCheck() {
+    const checkAllBtn = document.getElementById('checkAllVideos');
+    if (checkAllBtn) {
+        checkAllBtn.addEventListener('click', async function() {
+            const videoWrappers = document.querySelectorAll('.video-card-wrapper');
+            const videoIds = [];
+            videoWrappers.forEach(wrapper => {
+                const videoId = wrapper.dataset.videoId;
+                if (videoId) videoIds.push(videoId);
+            });
+            
+            if (videoIds.length > 0) {
+                this.disabled = true;
+                this.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>检查中...';
+                
+                await batchCheckIntegrity(videoIds);
+                
+                setTimeout(() => {
+                    this.disabled = false;
+                    this.innerHTML = '<i class="bi bi-shield-check"></i> 检查视频完整性';
+                }, 3000);
+            }
+        });
+    }
+}
+
+// 页面卸载时停止轮询
+window.addEventListener('beforeunload', stopPolling);

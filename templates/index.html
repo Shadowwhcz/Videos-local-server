@@ -155,6 +155,10 @@
                 <i class="bi bi-folder2-open"></i>
                 <span>第 <strong>{{ page }}</strong> / {{ total_pages if total_pages > 0 else 1 }} 页</span>
             </div>
+            <div class="stat-item" id="integrityStatus" style="display: none;">
+                <i class="bi bi-shield-check text-success"></i>
+                <span>已检查 <strong id="checkedCount">0</strong> 个视频</span>
+            </div>
         </div>
         {% endif %}
         
@@ -162,36 +166,51 @@
         {% if videos %}
         <div class="video-grid" data-preview-enabled="true">
             {% for video in videos %}
-            <a href="/play/{{ video.id }}" class="video-card" data-video-id="{{ video.id }}" data-video-path="{{ video.path | urlencode }}">
-                <div class="video-thumb">
-                    <img class="video-thumbnail" 
-                         data-src="/api/video/thumbnail/{{ video.id }}" 
-                         src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect fill='%231a1a2e' width='16' height='9'/%3E%3C/svg%3E"
-                         alt="{{ video.name }}"
-                         loading="lazy">
-                    <div class="thumb-placeholder">
-                        <i class="bi bi-play-circle"></i>
-                    </div>
-                    <div class="play-overlay">
-                        <div class="play-btn">
-                            <i class="bi bi-play-fill"></i>
+            <div class="video-card-wrapper" data-video-id="{{ video.id }}" data-video-name="{{ video.name }}">
+                <a href="/play/{{ video.id }}" class="video-card">
+                    <div class="video-thumb">
+                        <img class="video-thumbnail" 
+                             data-src="/api/video/thumbnail/{{ video.id }}" 
+                             src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect fill='%231a1a2e' width='16' height='9'/%3E%3C/svg%3E"
+                             alt="{{ video.name }}"
+                             loading="lazy">
+                        <div class="thumb-placeholder">
+                            <i class="bi bi-play-circle"></i>
+                        </div>
+                        <div class="play-overlay">
+                            <div class="play-btn">
+                                <i class="bi bi-play-fill"></i>
+                            </div>
+                        </div>
+                        <div class="video-preview" data-src="/stream/{{ video.id }}">
+                            <video muted preload="metadata"></video>
+                        </div>
+                        <!-- 损坏警告图标 -->
+                        <div class="corrupted-warning" style="display: none;" title="视频文件可能已损坏">
+                            <i class="bi bi-exclamation-triangle-fill"></i>
                         </div>
                     </div>
-                    <div class="video-preview" data-src="/stream/{{ video.id }}">
-                        <video muted preload="metadata"></video>
+                    <div class="video-info">
+                        <div class="video-title" title="{{ video.name }}">{{ video.name }}</div>
+                        {% if video.parent_dir %}
+                        <div class="video-folder" title="{{ video.parent_dir }}">
+                            <i class="bi bi-folder2"></i> {{ video.parent_dir }}
+                        </div>
+                        {% endif %}
+                        <div class="video-meta">
+                            <span class="ext-badge">{{ video.ext }}</span>
+                            <span class="video-duration" data-video-id="{{ video.id }}">
+                                <i class="bi bi-clock"></i> <span class="duration-text">--:--</span>
+                            </span>
+                            <span><i class="bi bi-hdd"></i> {{ video.size_mb }} MB</span>
+                        </div>
                     </div>
-                </div>
-                <div class="video-info">
-                    <div class="video-title" title="{{ video.name }}">{{ video.name }}</div>
-                    <div class="video-meta">
-                        <span class="ext-badge">{{ video.ext }}</span>
-                        <span class="video-duration" data-video-id="{{ video.id }}">
-                            <i class="bi bi-clock"></i> <span class="duration-text">--:--</span>
-                        </span>
-                        <span><i class="bi bi-hdd"></i> {{ video.size_mb }} MB</span>
-                    </div>
-                </div>
-            </a>
+                </a>
+                <!-- 删除按钮 -->
+                <button class="video-delete-btn" title="删除视频" data-video-id="{{ video.id }}" data-video-name="{{ video.name }}">
+                    <i class="bi bi-trash3"></i>
+                </button>
+            </div>
             {% endfor %}
         </div>
         
@@ -199,36 +218,51 @@
         {% elif browse_result and browse_result.videos %}
         <div class="video-grid" data-preview-enabled="true">
             {% for video in browse_result.videos %}
-            <a href="/play/{{ video.id }}" class="video-card" data-video-id="{{ video.id }}" data-video-path="{{ video.path | urlencode }}">
-                <div class="video-thumb">
-                    <img class="video-thumbnail" 
-                         data-src="/api/video/thumbnail/{{ video.id }}" 
-                         src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect fill='%231a1a2e' width='16' height='9'/%3E%3C/svg%3E"
-                         alt="{{ video.name }}"
-                         loading="lazy">
-                    <div class="thumb-placeholder">
-                        <i class="bi bi-play-circle"></i>
-                    </div>
-                    <div class="play-overlay">
-                        <div class="play-btn">
-                            <i class="bi bi-play-fill"></i>
+            <div class="video-card-wrapper" data-video-id="{{ video.id }}" data-video-name="{{ video.name }}">
+                <a href="/play/{{ video.id }}" class="video-card">
+                    <div class="video-thumb">
+                        <img class="video-thumbnail" 
+                             data-src="/api/video/thumbnail/{{ video.id }}" 
+                             src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect fill='%231a1a2e' width='16' height='9'/%3E%3C/svg%3E"
+                             alt="{{ video.name }}"
+                             loading="lazy">
+                        <div class="thumb-placeholder">
+                            <i class="bi bi-play-circle"></i>
+                        </div>
+                        <div class="play-overlay">
+                            <div class="play-btn">
+                                <i class="bi bi-play-fill"></i>
+                            </div>
+                        </div>
+                        <div class="video-preview" data-src="/stream/{{ video.id }}">
+                            <video muted preload="metadata"></video>
+                        </div>
+                        <!-- 损坏警告图标 -->
+                        <div class="corrupted-warning" style="display: none;" title="视频文件可能已损坏">
+                            <i class="bi bi-exclamation-triangle-fill"></i>
                         </div>
                     </div>
-                    <div class="video-preview" data-src="/stream/{{ video.id }}">
-                        <video muted preload="metadata"></video>
+                    <div class="video-info">
+                        <div class="video-title" title="{{ video.name }}">{{ video.name }}</div>
+                        {% if video.rel_path %}
+                        <div class="video-folder" title="{{ video.rel_path }}">
+                            <i class="bi bi-folder2"></i> {{ video.rel_path | dirname }}
+                        </div>
+                        {% endif %}
+                        <div class="video-meta">
+                            <span class="ext-badge">{{ video.ext }}</span>
+                            <span class="video-duration" data-video-id="{{ video.id }}">
+                                <i class="bi bi-clock"></i> <span class="duration-text">--:--</span>
+                            </span>
+                            <span><i class="bi bi-hdd"></i> {{ video.size_mb }} MB</span>
+                        </div>
                     </div>
-                </div>
-                <div class="video-info">
-                    <div class="video-title" title="{{ video.name }}">{{ video.name }}</div>
-                    <div class="video-meta">
-                        <span class="ext-badge">{{ video.ext }}</span>
-                        <span class="video-duration" data-video-id="{{ video.id }}">
-                            <i class="bi bi-clock"></i> <span class="duration-text">--:--</span>
-                        </span>
-                        <span><i class="bi bi-hdd"></i> {{ video.size_mb }} MB</span>
-                    </div>
-                </div>
-            </a>
+                </a>
+                <!-- 删除按钮 -->
+                <button class="video-delete-btn" title="删除视频" data-video-id="{{ video.id }}" data-video-name="{{ video.name }}">
+                    <i class="bi bi-trash3"></i>
+                </button>
+            </div>
             {% endfor %}
         </div>
         
@@ -308,8 +342,26 @@
     
     <!-- Footer -->
     <footer>
-        <small>局域网视频服务器 · 支持多种视频格式 · 悬停预览</small>
+        <small>局域网视频服务器 · 支持多种视频格式 · 悬停预览 · 自动检测损坏视频</small>
     </footer>
+    
+    <!-- 损坏视频提示弹窗 -->
+    <div id="corruptedAlertModal" class="delete-modal">
+        <div class="delete-modal-content">
+            <div class="delete-modal-icon" style="background: rgba(220, 38, 38, 0.15);">
+                <i class="bi bi-exclamation-triangle-fill" style="color: #dc2626;"></i>
+            </div>
+            <h3>视频已损坏</h3>
+            <p>视频文件已损坏，无法播放</p>
+            <p class="corrupted-video-name" style="color: var(--text-secondary); font-weight: 600;"></p>
+            <div class="delete-modal-actions">
+                <button class="btn btn-secondary" onclick="this.closest('.delete-modal').classList.remove('show')">关闭</button>
+                <button class="btn btn-outline-danger" onclick="document.querySelector('.video-card-wrapper.corrupted .video-delete-btn')?.click(); this.closest('.delete-modal').classList.remove('show')">
+                    <i class="bi bi-trash3 me-1"></i>删除此视频
+                </button>
+            </div>
+        </div>
+    </div>
     
     <!-- Bootstrap 5 JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>

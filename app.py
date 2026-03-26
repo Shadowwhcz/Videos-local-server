@@ -4,16 +4,19 @@
 import os
 import configparser
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict
 import mimetypes
 import json
 import subprocess
 import hashlib
 from datetime import datetime, timedelta
 from urllib.parse import unquote
+import threading
+import time
+import pickle
 
-from fastapi import FastAPI, Request, Query, HTTPException, Depends, Form
-from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, Response, RedirectResponse
+from fastapi import FastAPI, Request, Query, HTTPException, Depends, Form, BackgroundTasks, Body
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, Response, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -47,10 +50,31 @@ def get_video_id(video_path: str) -> str:
 THUMBNAIL_DIR = BASE_DIR / "thumbnails"
 THUMBNAIL_DIR.mkdir(exist_ok=True)
 
+# 视频完整性检查缓存（内存缓存）
+# 结构: {video_id: {"valid": bool, "error": str, "checked_at": float, "info": dict}}
+VIDEO_INTEGRITY_CACHE: Dict[str, dict] = {}
+CACHE_LOCK = threading.Lock()
+CACHE_EXPIRE_HOURS = 24  # 缓存过期时间
+
+# 视频扫描缓存（文件缓存）
+VIDEO_SCAN_CACHE_FILE = BASE_DIR / ".video_scan_cache"
+VIDEO_SCAN_CACHE: Dict[str, dict] = {}  # 结构: {"videos": [...], "scanned_at": float, "dir_mtimes": {...}}
+VIDEO_SCAN_CACHE_LOCK = threading.Lock()
+VIDEO_SCAN_CACHE_EXPIRE_HOURS = 1  # 缓存过期时间（小时）
+
 # 静态文件和模板
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.mount("/thumbnails", StaticFiles(directory=THUMBNAIL_DIR), name="thumbnails")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+
+# 添加自定义 Jinja2 过滤器
+def dirname_filter(path):
+    """获取路径的父目录"""
+    if not path:
+        return ''
+    return os.path.dirname(path)
+
+templates.env.filters['dirname'] = dirname_filter
 
 
 class VideoServer:
@@ -204,11 +228,80 @@ class VideoServer:
             pass
         return False
     
-    def scan_videos(self, search: str = "", directory: str = None) -> list[dict]:
-        """扫描视频文件"""
-        videos = []
+    def _get_dir_mtime(self, directory: str) -> float:
+        """获取目录及其子目录的最新修改时间"""
+        max_mtime = 0
+        try:
+            for root, dirs, files in os.walk(directory):
+                # 检查目录修改时间
+                try:
+                    mtime = os.stat(root).st_mtime
+                    max_mtime = max(max_mtime, mtime)
+                except:
+                    pass
+                # 检查文件修改时间
+                for f in files:
+                    try:
+                        mtime = os.stat(os.path.join(root, f)).st_mtime
+                        max_mtime = max(max_mtime, mtime)
+                    except:
+                        pass
+        except:
+            pass
+        return max_mtime
+    
+    def _load_scan_cache(self) -> dict:
+        """从文件加载扫描缓存"""
+        try:
+            if VIDEO_SCAN_CACHE_FILE.exists():
+                with open(VIDEO_SCAN_CACHE_FILE, 'rb') as f:
+                    return pickle.load(f)
+        except:
+            pass
+        return {}
+    
+    def _save_scan_cache(self, cache: dict):
+        """保存扫描缓存到文件"""
+        try:
+            with open(VIDEO_SCAN_CACHE_FILE, 'wb') as f:
+                pickle.dump(cache, f)
+        except:
+            pass
+    
+    def _is_cache_valid(self, cache: dict) -> bool:
+        """检查缓存是否有效"""
+        if not cache or 'scanned_at' not in cache or 'videos' not in cache:
+            return False
         
+        # 检查时间过期
+        age_hours = (time.time() - cache.get('scanned_at', 0)) / 3600
+        if age_hours > VIDEO_SCAN_CACHE_EXPIRE_HOURS:
+            return False
+        
+        # 检查目录是否有变化
+        cached_mtimes = cache.get('dir_mtimes', {})
+        for base_dir in self.video_dirs:
+            current_mtime = self._get_dir_mtime(base_dir)
+            cached_mtime = cached_mtimes.get(base_dir, 0)
+            if current_mtime > cached_mtime:
+                return False
+        
+        return True
+    
+    def scan_videos(self, search: str = "", directory: str = None, use_cache: bool = True) -> list[dict]:
+        """扫描视频文件（支持缓存）"""
         dirs_to_scan = [directory] if directory else self.video_dirs
+        cache_key = ",".join(sorted(dirs_to_scan))
+        
+        # 尝试使用缓存（仅当不搜索且使用全部目录时）
+        if use_cache and not search and not directory:
+            with VIDEO_SCAN_CACHE_LOCK:
+                cache = self._load_scan_cache()
+                if self._is_cache_valid(cache):
+                    return cache.get('videos', [])
+        
+        # 执行扫描
+        videos = []
         
         for base_dir in dirs_to_scan:
             if not os.path.exists(base_dir):
@@ -231,10 +324,14 @@ class VideoServer:
                         stat = os.stat(full_path)
                         rel_path = os.path.relpath(full_path, base_dir)
                         
+                        # 提取文件所在目录（相对路径的父目录）
+                        parent_dir = os.path.dirname(rel_path)
+                        
                         videos.append({
                             'name': file,
                             'path': full_path,
                             'rel_path': rel_path,
+                            'parent_dir': parent_dir if parent_dir else '',  # 空表示在根目录
                             'size': stat.st_size,
                             'size_mb': round(stat.st_size / (1024 * 1024), 1),
                             'modified': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M'),
@@ -246,7 +343,31 @@ class VideoServer:
         
         # 按修改时间排序（最新在前）
         videos.sort(key=lambda x: x['modified'], reverse=True)
+        
+        # 更新缓存（仅当不搜索且使用全部目录时）
+        if use_cache and not search and not directory:
+            dir_mtimes = {d: self._get_dir_mtime(d) for d in self.video_dirs}
+            with VIDEO_SCAN_CACHE_LOCK:
+                cache = {
+                    'videos': videos,
+                    'scanned_at': time.time(),
+                    'dir_mtimes': dir_mtimes,
+                }
+                self._save_scan_cache(cache)
+        
         return videos
+    
+    def refresh_scan_cache(self):
+        """强制刷新扫描缓存"""
+        with VIDEO_SCAN_CACHE_LOCK:
+            # 删除旧缓存
+            if VIDEO_SCAN_CACHE_FILE.exists():
+                try:
+                    VIDEO_SCAN_CACHE_FILE.unlink()
+                except:
+                    pass
+        # 重新扫描
+        self.scan_videos(use_cache=False)
     
     def get_video_path(self, video_id: str) -> Optional[str]:
         """根据视频ID获取路径"""
@@ -760,7 +881,220 @@ async def api_config():
         "port": video_server.port,
         "directories": video_server.video_dirs,
         "extensions": list(video_server.extensions),
+        "auth_enabled": video_server.auth_enabled,
     }
+
+
+# ==================== 视频完整性检查 ====================
+
+def check_single_video_integrity(video_path: str) -> dict:
+    """检查单个视频文件的完整性"""
+    if not os.path.exists(video_path):
+        return {"valid": False, "error": "文件不存在"}
+    
+    try:
+        # 使用 ffprobe 快速检查
+        cmd = [
+            'ffprobe', '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=codec_name,width,height,duration',
+            '-of', 'json',
+            video_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() if result.stderr else "无法读取视频信息"
+            return {"valid": False, "error": error_msg[:100]}
+        
+        data = json.loads(result.stdout)
+        streams = data.get('streams', [])
+        
+        if not streams:
+            return {"valid": False, "error": "未找到视频流"}
+        
+        video_stream = streams[0]
+        
+        if not video_stream.get('codec_name'):
+            return {"valid": False, "error": "缺少编解码器信息"}
+        
+        return {
+            "valid": True,
+            "info": {
+                "codec": video_stream.get('codec_name'),
+                "width": video_stream.get('width'),
+                "height": video_stream.get('height'),
+                "duration": video_stream.get('duration'),
+            }
+        }
+        
+    except subprocess.TimeoutExpired:
+        return {"valid": False, "error": "检查超时"}
+    except json.JSONDecodeError:
+        return {"valid": False, "error": "解析视频信息失败"}
+    except FileNotFoundError:
+        return {"valid": False, "error": "ffprobe 未安装"}
+    except Exception as e:
+        return {"valid": False, "error": str(e)[:50]}
+
+
+def get_cached_integrity(video_id: str) -> Optional[dict]:
+    """获取缓存的完整性检查结果"""
+    with CACHE_LOCK:
+        cached = VIDEO_INTEGRITY_CACHE.get(video_id)
+        if cached:
+            # 检查是否过期
+            age_hours = (time.time() - cached.get("checked_at", 0)) / 3600
+            if age_hours < CACHE_EXPIRE_HOURS:
+                return cached
+    return None
+
+
+def set_cached_integrity(video_id: str, result: dict):
+    """缓存完整性检查结果"""
+    with CACHE_LOCK:
+        VIDEO_INTEGRITY_CACHE[video_id] = {
+            **result,
+            "checked_at": time.time()
+        }
+
+
+def background_check_videos(video_ids: List[str], video_paths: Dict[str, str]):
+    """后台批量检查视频完整性"""
+    for video_id in video_ids:
+        # 跳过已有缓存的
+        if get_cached_integrity(video_id):
+            continue
+        
+        video_path = video_paths.get(video_id)
+        if video_path:
+            result = check_single_video_integrity(video_path)
+            set_cached_integrity(video_id, result)
+            time.sleep(0.1)  # 避免IO过载
+
+
+@app.get("/api/video/integrity/{video_id}")
+async def get_video_integrity(video_id: str):
+    """API: 获取单个视频完整性状态"""
+    # 先检查缓存
+    cached = get_cached_integrity(video_id)
+    if cached:
+        return {"video_id": video_id, "cached": True, **cached}
+    
+    # 没有缓存则检查
+    video_path = video_server.get_video_path(video_id)
+    if not video_path:
+        return {"video_id": video_id, "valid": False, "error": "视频不存在", "cached": False}
+    
+    result = check_single_video_integrity(video_path)
+    set_cached_integrity(video_id, result)
+    
+    return {"video_id": video_id, "cached": False, **result}
+
+
+@app.post("/api/videos/integrity/batch")
+async def batch_check_integrity(
+    background_tasks: BackgroundTasks,
+    request: Request
+):
+    """API: 批量检查视频完整性，返回缓存状态并启动后台检查"""
+    # 获取请求体中的 video_ids
+    try:
+        body = await request.json()
+        video_ids = body.get("video_ids", [])
+    except:
+        video_ids = []
+    
+    if not video_ids:
+        return {"results": {}, "pending": []}
+    
+    results = {}
+    pending = []
+    video_paths = {}
+    
+    # 收集需要检查的视频
+    for video_id in video_ids:
+        cached = get_cached_integrity(video_id)
+        if cached:
+            results[video_id] = cached
+        else:
+            video_path = video_server.get_video_path(video_id)
+            if video_path:
+                video_paths[video_id] = video_path
+                pending.append(video_id)
+    
+    # 启动后台检查任务
+    if pending:
+        background_tasks.add_task(background_check_videos, pending, video_paths)
+    
+    return {
+        "results": results,
+        "pending": pending,
+        "total": len(video_ids)
+    }
+
+
+@app.get("/api/videos/integrity/status")
+async def get_integrity_status(video_ids: str = Query(default="")):
+    """API: 获取多个视频的缓存完整性状态（用于轮询更新）"""
+    if not video_ids:
+        return {"results": {}}
+    
+    ids = video_ids.split(",")[:100]  # 最多100个
+    results = {}
+    
+    for video_id in ids:
+        cached = get_cached_integrity(video_id.strip())
+        if cached:
+            results[video_id] = cached
+    
+    return {"results": results}
+
+
+@app.delete("/api/video/{video_id}")
+async def delete_video(video_id: str, request: Request):
+    """API: 删除视频文件"""
+    # 需要登录才能删除
+    if video_server.auth_enabled and not get_current_user(request):
+        raise HTTPException(status_code=401, detail="未登录，无法删除")
+    
+    video_path = video_server.get_video_path(video_id)
+    if not video_path:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    
+    if not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail="视频文件不存在")
+    
+    # 验证文件在配置的目录内（安全检查）
+    is_valid_path = False
+    for base_dir in video_server.video_dirs:
+        if video_path.startswith(base_dir):
+            is_valid_path = True
+            break
+    
+    if not is_valid_path:
+        raise HTTPException(status_code=403, detail="无权删除此文件")
+    
+    try:
+        # 删除文件
+        os.remove(video_path)
+        
+        # 删除缩略图（如果存在）
+        video_hash = hashlib.md5(video_path.encode()).hexdigest()
+        thumb_path = THUMBNAIL_DIR / f"{video_hash}.jpg"
+        if thumb_path.exists():
+            thumb_path.unlink()
+        
+        # 清除完整性缓存
+        with CACHE_LOCK:
+            VIDEO_INTEGRITY_CACHE.pop(video_id, None)
+        
+        return {"success": True, "message": f"已删除: {os.path.basename(video_path)}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+
+
+
 
 
 @app.get("/favicon.ico")
