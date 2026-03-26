@@ -4,12 +4,16 @@
 import os
 import configparser
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 import mimetypes
+import json
+import subprocess
+import hashlib
 from datetime import datetime
+from urllib.parse import unquote
 
 from fastapi import FastAPI, Request, Query, HTTPException
-from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import uvicorn
@@ -20,8 +24,13 @@ app = FastAPI(title="局域网视频服务器")
 # 获取项目根目录
 BASE_DIR = Path(__file__).resolve().parent
 
+# 缩略图缓存目录
+THUMBNAIL_DIR = BASE_DIR / "thumbnails"
+THUMBNAIL_DIR.mkdir(exist_ok=True)
+
 # 静态文件和模板
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+app.mount("/thumbnails", StaticFiles(directory=THUMBNAIL_DIR), name="thumbnails")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
@@ -39,12 +48,24 @@ class VideoServer:
         # 视频目录
         dirs_str = self.config.get('video', 'directories', fallback='~/Movies')
         self.video_dirs = []
+        self.video_dir_names = {}  # 目录别名映射
         for d in dirs_str.split(','):
             d = d.strip()
-            if d.startswith('~'):
-                d = os.path.expanduser(d)
-            if os.path.isdir(d):
-                self.video_dirs.append(d)
+            if '=' in d:
+                # 支持别名: name=/path/to/dir
+                name, path = d.split('=', 1)
+                name = name.strip()
+                path = path.strip()
+            else:
+                name = os.path.basename(d)
+                path = d
+            
+            if path.startswith('~'):
+                path = os.path.expanduser(path)
+            
+            if os.path.isdir(path):
+                self.video_dirs.append(path)
+                self.video_dir_names[path] = name
         
         # 支持的格式
         exts_str = self.config.get('video', 'extensions', fallback='mp4,mkv,avi,mov,wmv,flv,webm,m4v')
@@ -53,11 +74,118 @@ class VideoServer:
         # UI配置
         self.videos_per_page = self.config.getint('ui', 'videos_per_page', fallback=30)
     
-    def scan_videos(self, search: str = "") -> list[dict]:
+    def get_directories(self) -> List[dict]:
+        """获取配置的视频目录列表"""
+        dirs = []
+        for d in self.video_dirs:
+            name = self.video_dir_names.get(d, os.path.basename(d))
+            video_count = self._count_videos(d)
+            dirs.append({
+                'name': name,
+                'path': d,
+                'video_count': video_count,
+            })
+        return dirs
+    
+    def _count_videos(self, directory: str) -> int:
+        """计算目录中的视频数量"""
+        count = 0
+        try:
+            for root, _, files in os.walk(directory):
+                for f in files:
+                    if os.path.splitext(f)[1].lower() in self.extensions:
+                        count += 1
+        except:
+            pass
+        return count
+    
+    def list_directory(self, directory: str, relative_path: str = "") -> dict:
+        """列出指定目录下的文件夹和视频"""
+        if directory not in self.video_dirs:
+            # 检查是否是子目录
+            valid = False
+            for base_dir in self.video_dirs:
+                if directory.startswith(base_dir + os.sep):
+                    valid = True
+                    break
+            if not valid:
+                return {'error': '无效的目录'}
+        
+        full_path = os.path.join(directory, relative_path) if relative_path else directory
+        
+        if not os.path.exists(full_path):
+            return {'error': '目录不存在'}
+        
+        folders = []
+        videos = []
+        
+        try:
+            items = sorted(os.listdir(full_path), key=lambda x: x.lower())
+        except PermissionError:
+            return {'error': '无法访问该目录'}
+        
+        for item in items:
+            item_path = os.path.join(full_path, item)
+            item_rel_path = os.path.join(relative_path, item) if relative_path else item
+            
+            if os.path.isdir(item_path):
+                # 检查文件夹是否包含视频
+                has_videos = self._has_videos_recursive(item_path)
+                if has_videos:
+                    folders.append({
+                        'name': item,
+                        'path': item_rel_path,
+                        'type': 'folder',
+                    })
+            else:
+                ext = os.path.splitext(item)[1].lower()
+                if ext in self.extensions:
+                    try:
+                        stat = os.stat(item_path)
+                        videos.append({
+                            'name': item,
+                            'path': item_path,
+                            'rel_path': item_rel_path,
+                            'size': stat.st_size,
+                            'size_mb': round(stat.st_size / (1024 * 1024), 1),
+                            'modified': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M'),
+                            'ext': ext[1:].upper(),
+                            'base_dir': directory,
+                        })
+                    except (OSError, IOError):
+                        continue
+        
+        return {
+            'folders': folders,
+            'videos': videos,
+            'current_path': relative_path,
+            'parent_path': os.path.dirname(relative_path) if relative_path else None,
+        }
+    
+    def _has_videos_recursive(self, directory: str, max_depth: int = 3) -> bool:
+        """检查目录是否包含视频文件（递归）"""
+        if max_depth <= 0:
+            return False
+        try:
+            for item in os.listdir(directory):
+                item_path = os.path.join(directory, item)
+                if os.path.isfile(item_path):
+                    if os.path.splitext(item)[1].lower() in self.extensions:
+                        return True
+                elif os.path.isdir(item_path):
+                    if self._has_videos_recursive(item_path, max_depth - 1):
+                        return True
+        except:
+            pass
+        return False
+    
+    def scan_videos(self, search: str = "", directory: str = None) -> list[dict]:
         """扫描视频文件"""
         videos = []
         
-        for base_dir in self.video_dirs:
+        dirs_to_scan = [directory] if directory else self.video_dirs
+        
+        for base_dir in dirs_to_scan:
             if not os.path.exists(base_dir):
                 continue
             
@@ -103,6 +231,96 @@ class VideoServer:
             if str(hash(v['path'])) == video_id:
                 return v['path']
         return None
+    
+    def get_video_info(self, video_path: str) -> dict:
+        """获取视频详细信息（使用ffprobe）"""
+        info = {
+            'duration': None,
+            'duration_formatted': None,
+            'width': None,
+            'height': None,
+            'codec': None,
+            'bitrate': None,
+            'fps': None,
+        }
+        
+        try:
+            cmd = [
+                'ffprobe', '-v', 'quiet', '-print_format', 'json',
+                '-show_format', '-show_streams', video_path
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                
+                # 获取视频流信息
+                for stream in data.get('streams', []):
+                    if stream.get('codec_type') == 'video':
+                        info['width'] = stream.get('width')
+                        info['height'] = stream.get('height')
+                        info['codec'] = stream.get('codec_name')
+                        
+                        # 获取帧率
+                        fps_str = stream.get('r_frame_rate', '0/1')
+                        if '/' in fps_str:
+                            num, den = fps_str.split('/')
+                            if int(den) != 0:
+                                info['fps'] = round(int(num) / int(den), 2)
+                        break
+                
+                # 获取格式信息
+                fmt = data.get('format', {})
+                duration = float(fmt.get('duration', 0))
+                if duration > 0:
+                    info['duration'] = duration
+                    info['duration_formatted'] = self._format_duration(duration)
+                    info['bitrate'] = fmt.get('bit_rate')
+        
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
+            pass
+        
+        return info
+    
+    def _format_duration(self, seconds: float) -> str:
+        """格式化时长"""
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        
+        if hours > 0:
+            return f"{hours}:{minutes:02d}:{secs:02d}"
+        else:
+            return f"{minutes}:{secs:02d}"
+    
+    def get_thumbnail(self, video_path: str, timestamp: float = 5.0) -> Optional[str]:
+        """生成视频缩略图"""
+        # 使用视频路径的hash作为缓存文件名
+        video_hash = hashlib.md5(video_path.encode()).hexdigest()
+        thumb_path = THUMBNAIL_DIR / f"{video_hash}.jpg"
+        
+        # 如果缩略图已存在，直接返回
+        if thumb_path.exists():
+            return str(thumb_path)
+        
+        # 使用ffmpeg生成缩略图
+        try:
+            cmd = [
+                'ffmpeg', '-y', '-ss', str(timestamp),
+                '-i', video_path,
+                '-vframes', '1',
+                '-vf', 'scale=320:-1',
+                '-q:v', '3',
+                str(thumb_path)
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            
+            if result.returncode == 0 and thumb_path.exists():
+                return str(thumb_path)
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+        
+        return None
 
 
 # 全局配置实例
@@ -122,8 +340,36 @@ async def index(
     request: Request,
     search: str = Query(default=""),
     page: int = Query(default=1, ge=1),
+    dir_path: str = Query(default=""),
+    browse: str = Query(default=""),
 ):
-    """首页 - 视频列表"""
+    """首页 - 视频列表/目录浏览"""
+    directories = video_server.get_directories()
+    
+    # 如果指定了浏览目录
+    if browse:
+        browse_result = video_server.list_directory(browse, dir_path)
+        if 'error' in browse_result:
+            raise HTTPException(status_code=400, detail=browse_result['error'])
+        
+        # 为视频生成ID
+        for v in browse_result['videos']:
+            v['id'] = str(hash(v['path']))
+        
+        return templates.TemplateResponse(
+            "index.html",
+            {
+                "request": request,
+                "directories": directories,
+                "browse_result": browse_result,
+                "search": search,
+                "page": page,
+                "current_browse": browse,
+                "current_path": dir_path,
+            }
+        )
+    
+    # 全局搜索或全部视频列表
     all_videos = video_server.scan_videos(search)
     
     # 分页
@@ -143,6 +389,7 @@ async def index(
         "index.html",
         {
             "request": request,
+            "directories": directories,
             "videos": videos,
             "search": search,
             "page": page,
@@ -165,7 +412,11 @@ async def play(request: Request, video_id: str):
     if not video:
         raise HTTPException(status_code=404, detail="视频不存在")
     
+    # 获取视频详细信息
+    video_info = video_server.get_video_info(video['path'])
+    video.update(video_info)
     video['id'] = video_id
+    
     return templates.TemplateResponse(
         "play.html",
         {"request": request, "video": video}
@@ -249,12 +500,68 @@ async def stream_video(video_id: str, request: Request):
 
 
 @app.get("/api/videos")
-async def api_videos(search: str = ""):
+async def api_videos(search: str = "", directory: str = None):
     """API: 获取视频列表"""
-    videos = video_server.scan_videos(search)
+    videos = video_server.scan_videos(search, directory)
     for v in videos:
         v['id'] = str(hash(v['path']))
     return {"videos": videos, "total": len(videos)}
+
+
+@app.get("/api/directories")
+async def api_directories():
+    """API: 获取可用的视频目录列表"""
+    return {"directories": video_server.get_directories()}
+
+
+@app.get("/api/browse")
+async def api_browse(
+    directory: str = Query(default=""),
+    path: str = Query(default=""),
+):
+    """API: 浏览目录内容"""
+    if not directory:
+        return {"error": "请指定目录"}
+    
+    result = video_server.list_directory(directory, path)
+    return result
+
+
+@app.get("/api/video/info/{video_id}")
+async def api_video_info(video_id: str):
+    """API: 获取视频详细信息"""
+    video_path = video_server.get_video_path(video_id)
+    if not video_path:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    
+    info = video_server.get_video_info(video_path)
+    
+    # 获取基本文件信息
+    stat = os.stat(video_path)
+    info['size'] = stat.st_size
+    info['size_mb'] = round(stat.st_size / (1024 * 1024), 1)
+    info['modified'] = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
+    
+    return info
+
+
+@app.get("/api/video/thumbnail/{video_id}")
+async def api_video_thumbnail(
+    video_id: str,
+    timestamp: float = Query(default=5.0, description="截图时间点（秒）"),
+):
+    """API: 获取视频缩略图"""
+    video_path = video_server.get_video_path(video_id)
+    if not video_path:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    
+    thumb_path = video_server.get_thumbnail(video_path, timestamp)
+    
+    if thumb_path and os.path.exists(thumb_path):
+        return FileResponse(thumb_path, media_type="image/jpeg")
+    else:
+        # 返回默认占位图
+        raise HTTPException(status_code=404, detail="无法生成缩略图")
 
 
 @app.get("/api/config")
@@ -271,10 +578,10 @@ async def api_config():
 @app.get("/favicon.ico")
 async def favicon():
     """网站图标"""
-    return FileResponse(
-        BASE_DIR / "static" / "favicon.ico",
-        media_type="image/x-icon"
-    )
+    favicon_path = BASE_DIR / "static" / "favicon.ico"
+    if favicon_path.exists():
+        return FileResponse(favicon_path, media_type="image/x-icon")
+    return Response(status_code=404)
 
 
 def main():

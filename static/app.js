@@ -1,7 +1,21 @@
-// 视频服务器前端脚本
+/**
+ * 视频服务器前端脚本
+ */
 
 document.addEventListener('DOMContentLoaded', function() {
-    // 搜索框交互
+    // 初始化所有功能
+    initSearch();
+    initVideoCards();
+    initThumbnails();
+    initVideoPreview();
+    initVideoDurations();
+    initPlayer();
+});
+
+/**
+ * 搜索框交互
+ */
+function initSearch() {
     const searchInput = document.querySelector('.search-box input');
     if (searchInput) {
         searchInput.addEventListener('keypress', function(e) {
@@ -10,20 +24,173 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-    
-    // 视频卡片点击
+}
+
+/**
+ * 视频卡片点击
+ */
+function initVideoCards() {
     document.querySelectorAll('.video-card').forEach(card => {
         card.addEventListener('click', function(e) {
-            e.preventDefault();
-            const href = this.getAttribute('href');
-            if (href) {
-                window.location.href = href;
-            }
+            // 不阻止默认行为，让链接正常跳转
         });
     });
-});
+}
 
-// 播放器功能
+/**
+ * 缩略图懒加载
+ */
+function initThumbnails() {
+    const thumbnails = document.querySelectorAll('.video-thumbnail');
+    
+    if ('IntersectionObserver' in window) {
+        const imageObserver = new IntersectionObserver((entries, observer) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const img = entry.target;
+                    const src = img.dataset.src;
+                    
+                    if (src) {
+                        img.onload = () => {
+                            img.classList.add('loaded');
+                        };
+                        img.onerror = () => {
+                            // 加载失败，保持占位符
+                            img.style.display = 'none';
+                        };
+                        img.src = src;
+                    }
+                    
+                    observer.unobserve(img);
+                }
+            });
+        }, {
+            rootMargin: '100px 0px',
+            threshold: 0.1
+        });
+        
+        thumbnails.forEach(img => imageObserver.observe(img));
+    } else {
+        // 降级处理：直接加载所有图片
+        thumbnails.forEach(img => {
+            if (img.dataset.src) {
+                img.src = img.dataset.src;
+                img.onload = () => img.classList.add('loaded');
+            }
+        });
+    }
+}
+
+/**
+ * 视频预览（悬停播放）
+ */
+function initVideoPreview() {
+    const videoCards = document.querySelectorAll('.video-card');
+    
+    videoCards.forEach(card => {
+        const previewContainer = card.querySelector('.video-preview');
+        const video = previewContainer?.querySelector('video');
+        const thumbnail = card.querySelector('.video-thumbnail');
+        
+        if (!previewContainer || !video) return;
+        
+        let loaded = false;
+        let loadPromise = null;
+        
+        // 鼠标进入时开始加载
+        card.addEventListener('mouseenter', () => {
+            if (!loaded && !loadPromise) {
+                const src = previewContainer.dataset.src;
+                if (src) {
+                    video.src = src + '#t=3'; // 从第3秒开始
+                    loadPromise = video.load();
+                    loaded = true;
+                }
+            }
+        });
+        
+        // 悬停一段时间后开始播放预览
+        let hoverTimeout;
+        card.addEventListener('mouseenter', () => {
+            hoverTimeout = setTimeout(() => {
+                if (video.readyState >= 2) {
+                    video.play().catch(() => {});
+                    thumbnail?.classList.add('preview-active');
+                }
+            }, 800); // 悬停800ms后开始预览
+        });
+        
+        card.addEventListener('mouseleave', () => {
+            clearTimeout(hoverTimeout);
+            video.pause();
+            video.currentTime = 3;
+            thumbnail?.classList.remove('preview-active');
+        });
+        
+        // 点击时停止预览
+        card.addEventListener('click', () => {
+            video.pause();
+        });
+    });
+}
+
+/**
+ * 获取视频时长
+ */
+function initVideoDurations() {
+    const durationElements = document.querySelectorAll('.video-duration');
+    
+    durationElements.forEach(el => {
+        const videoId = el.dataset.videoId;
+        if (!videoId) return;
+        
+        // 尝试从缓存获取
+        const cacheKey = `video_duration_${videoId}`;
+        const cached = localStorage.getItem(cacheKey);
+        
+        if (cached) {
+            updateDurationDisplay(el, cached);
+            return;
+        }
+        
+        // 异步获取时长
+        fetchVideoInfo(videoId).then(info => {
+            if (info.duration_formatted) {
+                updateDurationDisplay(el, info.duration_formatted);
+                // 缓存1小时
+                localStorage.setItem(cacheKey, info.duration_formatted);
+                localStorage.setItem(`${cacheKey}_time`, Date.now().toString());
+            }
+        }).catch(() => {
+            // 静默失败
+        });
+    });
+}
+
+/**
+ * 更新时长显示
+ */
+function updateDurationDisplay(element, duration) {
+    const textEl = element.querySelector('.duration-text');
+    if (textEl) {
+        textEl.textContent = duration;
+    }
+}
+
+/**
+ * 获取视频信息API
+ */
+async function fetchVideoInfo(videoId) {
+    const response = await fetch(`/api/video/info/${videoId}`);
+    if (!response.ok) {
+        throw new Error('Failed to fetch video info');
+    }
+    return response.json();
+}
+
+/**
+ * 播放器功能
+ */
 function initPlayer() {
     const video = document.getElementById('videoPlayer');
     if (!video) return;
@@ -103,7 +270,9 @@ function initPlayer() {
     video.addEventListener('seeked', showProgress);
 }
 
-// 全屏切换
+/**
+ * 全屏切换
+ */
 function toggleFullscreen() {
     const container = document.querySelector('.video-wrapper');
     if (!container) return;
@@ -117,9 +286,26 @@ function toggleFullscreen() {
     }
 }
 
-// 页面加载完成后初始化播放器
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initPlayer);
-} else {
-    initPlayer();
+/**
+ * 清理过期的缓存
+ */
+function cleanExpiredCache() {
+    const now = Date.now();
+    const expireTime = 60 * 60 * 1000; // 1小时
+    
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('video_duration_') && key.endsWith('_time')) {
+            const time = parseInt(localStorage.getItem(key));
+            if (now - time > expireTime) {
+                // 删除过期的缓存
+                const cacheKey = key.replace('_time', '');
+                localStorage.removeItem(cacheKey);
+                localStorage.removeItem(key);
+            }
+        }
+    }
 }
+
+// 页面加载时清理过期缓存
+cleanExpiredCache();

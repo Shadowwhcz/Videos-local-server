@@ -20,6 +20,7 @@
 <body>
     <!-- 粒子背景 -->
     <div id="particles-js"></div>
+    
     <!-- 导航栏 -->
     <nav class="navbar navbar-expand-lg sticky-top">
         <div class="container">
@@ -42,6 +43,12 @@
                                value="{{ search }}" 
                                placeholder="搜索视频..."
                                autocomplete="off">
+                        {% if current_browse %}
+                        <input type="hidden" name="browse" value="{{ current_browse }}">
+                        {% endif %}
+                        {% if current_path %}
+                        <input type="hidden" name="dir_path" value="{{ current_path }}">
+                        {% endif %}
                     </div>
                 </form>
             </div>
@@ -49,7 +56,87 @@
     </nav>
     
     <main class="container py-4">
+        <!-- 目录选择器（首页显示） -->
+        {% if directories and not browse_result and not search %}
+        <div class="directory-section">
+            <h5 class="section-title">
+                <i class="bi bi-folder2-open me-2"></i>选择视频目录
+            </h5>
+            <div class="directory-grid">
+                {% for dir in directories %}
+                <a href="/?browse={{ dir.path | urlencode }}" class="directory-card">
+                    <div class="dir-icon">
+                        <i class="bi bi-folder-fill"></i>
+                    </div>
+                    <div class="dir-info">
+                        <div class="dir-name">{{ dir.name }}</div>
+                        <div class="dir-count">{{ dir.video_count }} 个视频</div>
+                    </div>
+                    <i class="bi bi-chevron-right dir-arrow"></i>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <hr class="section-divider">
+        
+        <h5 class="section-title">
+            <i class="bi bi-clock-history me-2"></i>最近视频
+        </h5>
+        {% endif %}
+        
+        <!-- 目录导航面包屑（浏览目录时显示） -->
+        {% if browse_result %}
+        <div class="breadcrumb-nav">
+            <a href="/" class="breadcrumb-item">
+                <i class="bi bi-house-door"></i>
+                <span>首页</span>
+            </a>
+            <i class="bi bi-chevron-right breadcrumb-sep"></i>
+            {% set base_name = directories | selectattr('path', 'eq', current_browse) | map(attribute='name') | first %}
+            <a href="/?browse={{ current_browse | urlencode }}" class="breadcrumb-item">
+                {{ base_name or '目录' }}
+            </a>
+            {% if current_path %}
+            {% set path_parts = current_path.split('/') %}
+            {% set accumulated = '' %}
+            {% for part in path_parts %}
+            <i class="bi bi-chevron-right breadcrumb-sep"></i>
+            {% set accumulated = accumulated + '/' + part if accumulated else part %}
+            <a href="/?browse={{ current_browse | urlencode }}&dir_path={{ accumulated | urlencode }}" class="breadcrumb-item">
+                {{ part }}
+            </a>
+            {% endfor %}
+            {% endif %}
+        </div>
+        
+        <!-- 返回上级按钮 -->
+        {% if browse_result.parent_path != None %}
+        <a href="/?browse={{ current_browse | urlencode }}{% if browse_result.parent_path %}&dir_path={{ browse_result.parent_path | urlencode }}{% endif %}" 
+           class="back-folder-btn">
+            <i class="bi bi-arrow-left-circle"></i>
+            <span>返回上级</span>
+        </a>
+        {% endif %}
+        
+        <!-- 文件夹列表 -->
+        {% if browse_result.folders %}
+        <div class="folder-section">
+            <div class="folder-grid">
+                {% for folder in browse_result.folders %}
+                <a href="/?browse={{ current_browse | urlencode }}&dir_path={{ folder.path | urlencode }}" class="folder-card">
+                    <i class="bi bi-folder-fill folder-icon"></i>
+                    <span class="folder-name">{{ folder.name }}</span>
+                    <i class="bi bi-chevron-right folder-arrow"></i>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        {% endif %}
+        
         <!-- 统计信息 -->
+        {% if videos %}
         <div class="stats-bar">
             <div class="stat-item">
                 <i class="bi bi-collection-play"></i>
@@ -60,34 +147,110 @@
                 <span>第 <strong>{{ page }}</strong> / {{ total_pages if total_pages > 0 else 1 }} 页</span>
             </div>
         </div>
+        {% endif %}
         
         <!-- 视频网格 -->
         {% if videos %}
-        <div class="video-grid">
+        <div class="video-grid" data-preview-enabled="true">
             {% for video in videos %}
-            <a href="/play/{{ video.id }}" class="video-card">
+            <a href="/play/{{ video.id }}" class="video-card" data-video-id="{{ video.id }}" data-video-path="{{ video.path | urlencode }}">
                 <div class="video-thumb">
-                    <i class="bi bi-play-circle"></i>
+                    <img class="video-thumbnail" 
+                         data-src="/api/video/thumbnail/{{ video.id }}" 
+                         src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect fill='%231a1a2e' width='16' height='9'/%3E%3C/svg%3E"
+                         alt="{{ video.name }}"
+                         loading="lazy">
+                    <div class="thumb-placeholder">
+                        <i class="bi bi-play-circle"></i>
+                    </div>
                     <div class="play-overlay">
                         <div class="play-btn">
                             <i class="bi bi-play-fill"></i>
                         </div>
+                    </div>
+                    <div class="video-preview" data-src="/stream/{{ video.id }}">
+                        <video muted preload="metadata"></video>
                     </div>
                 </div>
                 <div class="video-info">
                     <div class="video-title" title="{{ video.name }}">{{ video.name }}</div>
                     <div class="video-meta">
                         <span class="ext-badge">{{ video.ext }}</span>
+                        <span class="video-duration" data-video-id="{{ video.id }}">
+                            <i class="bi bi-clock"></i> <span class="duration-text">--:--</span>
+                        </span>
                         <span><i class="bi bi-hdd"></i> {{ video.size_mb }} MB</span>
-                        <span><i class="bi bi-calendar3"></i> {{ video.modified }}</span>
                     </div>
                 </div>
             </a>
             {% endfor %}
         </div>
         
+        <!-- 浏览目录时的视频列表 -->
+        {% elif browse_result and browse_result.videos %}
+        <div class="video-grid" data-preview-enabled="true">
+            {% for video in browse_result.videos %}
+            <a href="/play/{{ video.id }}" class="video-card" data-video-id="{{ video.id }}" data-video-path="{{ video.path | urlencode }}">
+                <div class="video-thumb">
+                    <img class="video-thumbnail" 
+                         data-src="/api/video/thumbnail/{{ video.id }}" 
+                         src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect fill='%231a1a2e' width='16' height='9'/%3E%3C/svg%3E"
+                         alt="{{ video.name }}"
+                         loading="lazy">
+                    <div class="thumb-placeholder">
+                        <i class="bi bi-play-circle"></i>
+                    </div>
+                    <div class="play-overlay">
+                        <div class="play-btn">
+                            <i class="bi bi-play-fill"></i>
+                        </div>
+                    </div>
+                    <div class="video-preview" data-src="/stream/{{ video.id }}">
+                        <video muted preload="metadata"></video>
+                    </div>
+                </div>
+                <div class="video-info">
+                    <div class="video-title" title="{{ video.name }}">{{ video.name }}</div>
+                    <div class="video-meta">
+                        <span class="ext-badge">{{ video.ext }}</span>
+                        <span class="video-duration" data-video-id="{{ video.id }}">
+                            <i class="bi bi-clock"></i> <span class="duration-text">--:--</span>
+                        </span>
+                        <span><i class="bi bi-hdd"></i> {{ video.size_mb }} MB</span>
+                    </div>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        
+        {% elif browse_result and not browse_result.videos and not browse_result.folders %}
+        <!-- 空目录 -->
+        <div class="empty-state">
+            <i class="bi bi-folder-x"></i>
+            <h3>此目录为空</h3>
+            <p>该目录中没有视频文件</p>
+        </div>
+        
+        {% elif not search and not browse_result and not directories %}
+        <!-- 未配置目录 -->
+        <div class="empty-state">
+            <i class="bi bi-gear"></i>
+            <h3>未配置视频目录</h3>
+            <p>请检查 config.ini 中的配置</p>
+        </div>
+        
+        {% elif search and not videos %}
+        <!-- 搜索无结果 -->
+        <div class="empty-state">
+            <i class="bi bi-search"></i>
+            <h3>没有找到匹配的视频</h3>
+            <p>尝试其他搜索关键词</p>
+        </div>
+        
+        {% endif %}
+        
         <!-- 分页 -->
-        {% if total_pages > 1 %}
+        {% if total_pages and total_pages > 1 %}
         <nav class="pagination-wrapper">
             <ul class="pagination">
                 {% if page > 1 %}
@@ -132,20 +295,11 @@
             </ul>
         </nav>
         {% endif %}
-        
-        {% else %}
-        <!-- 空状态 -->
-        <div class="empty-state">
-            <i class="bi bi-emoji-frown"></i>
-            <h3>{% if search %}没有找到匹配的视频{% else %}暂无视频{% endif %}</h3>
-            <p>{% if search %}尝试其他搜索关键词{% else %}请检查配置文件中的视频目录{% endif %}</p>
-        </div>
-        {% endif %}
     </main>
     
     <!-- 页脚 -->
     <footer class="text-center py-4 text-white-50">
-        <small>局域网视频服务器 · 支持多种视频格式</small>
+        <small>局域网视频服务器 · 支持多种视频格式 · 悬停预览</small>
     </footer>
     
     <!-- Bootstrap 5 JS -->
