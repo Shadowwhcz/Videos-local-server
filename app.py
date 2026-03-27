@@ -1,21 +1,18 @@
 """
 局域网视频网站服务 - 主应用
 """
+from __future__ import annotations
+
 import os
 import configparser
 from pathlib import Path
 from typing import Optional, List, Dict
-import mimetypes
 import json
-import subprocess
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime
 from urllib.parse import unquote
 import threading
 import time
-import pickle
-import secrets
-from dataclasses import dataclass, field
 import asyncio
 from functools import lru_cache
 from collections import OrderedDict
@@ -27,6 +24,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
+from session_store import SessionManager
+from video_catalog import VideoServer, get_mime_type
+from video_health import (
+    background_check_videos,
+    check_single_video_integrity,
+    check_video_status,
+    clear_integrity_cache,
+    get_cached_integrity,
+    is_temp_file,
+    set_cached_integrity,
+)
 
 # ==================== 性能优化配置 ====================
 # 流媒体优化参数（针对外接硬盘优化）
@@ -43,198 +51,6 @@ _config = configparser.ConfigParser()
 _config.read("config.ini", encoding='utf-8')
 _secret_key = _config.get('auth', 'secret_key', fallback='videoserver-secret-key-change-in-production')
 
-# ==================== 服务端 Session 管理 ====================
-# 支持同一账号多设备登录，每个设备有独立的 session
-# 使用文件存储，支持多worker模式
-
-# SESSION_STORAGE_DIR 将在 BASE_DIR 定义后设置
-
-@dataclass
-class UserSession:
-    """用户会话信息"""
-    session_id: str
-    username: str
-    created_at: float
-    last_active: float
-    device_info: str = ""
-    remember_me: bool = False  # 是否记住登录
-
-class SessionManager:
-    """服务端 Session 管理器（文件存储，支持多worker）"""
-    
-    def __init__(self, session_expire_hours: int = 24 * 7, remember_days: int = 30, storage_dir: Path = None):
-        self.sessions: Dict[str, UserSession] = {}  # 内存缓存
-        self.user_sessions: Dict[str, List[str]] = {}  # 内存缓存
-        self.lock = threading.RLock()
-        self.expire_hours = session_expire_hours
-        self.remember_hours = remember_days * 24  # 记住登录30天
-        self._storage_dir = storage_dir  # 延迟初始化
-    
-    @property
-    def storage_dir(self) -> Path:
-        """获取存储目录（延迟初始化）"""
-        if self._storage_dir is None:
-            # 使用默认路径
-            self._storage_dir = Path(__file__).resolve().parent / "sessions"
-        if not self._storage_dir.exists():
-            self._storage_dir.mkdir(parents=True, exist_ok=True)
-        return self._storage_dir
-    
-    def _get_session_file(self, session_id: str) -> Path:
-        """获取session文件路径"""
-        return self.storage_dir / f"{session_id}.session"
-    
-    def _load_session(self, session_id: str) -> Optional[UserSession]:
-        """从文件加载session"""
-        try:
-            file_path = self._get_session_file(session_id)
-            if file_path.exists():
-                with open(file_path, 'rb') as f:
-                    return pickle.load(f)
-        except Exception as e:
-            print(f"加载session文件失败: {e}")
-        return None
-    
-    def _save_session(self, session: UserSession):
-        """保存session到文件"""
-        try:
-            file_path = self._get_session_file(session.session_id)
-            with open(file_path, 'wb') as f:
-                pickle.dump(session, f)
-        except Exception as e:
-            print(f"保存session文件失败: {e}")
-    
-    def _delete_session_file(self, session_id: str):
-        """删除session文件"""
-        try:
-            file_path = self._get_session_file(session_id)
-            if file_path.exists():
-                file_path.unlink()
-        except Exception as e:
-            print(f"删除session文件失败: {e}")
-    
-    def create_session(self, username: str, device_info: str = "", remember_me: bool = False) -> str:
-        """创建新会话，返回 session_id"""
-        session_id = secrets.token_urlsafe(32)
-        now = time.time()
-        
-        session = UserSession(
-            session_id=session_id,
-            username=username,
-            created_at=now,
-            last_active=now,
-            device_info=device_info,
-            remember_me=remember_me
-        )
-        
-        with self.lock:
-            self.sessions[session_id] = session
-            
-            # 添加到用户的会话列表
-            if username not in self.user_sessions:
-                self.user_sessions[username] = []
-            self.user_sessions[username].append(session_id)
-        
-        # 保存到文件
-        self._save_session(session)
-        
-        return session_id
-    
-    def get_session(self, session_id: str) -> Optional[UserSession]:
-        """获取会话信息"""
-        with self.lock:
-            session = self.sessions.get(session_id)
-            
-            # 如果内存中没有，尝试从文件加载
-            if not session:
-                session = self._load_session(session_id)
-                if session:
-                    self.sessions[session_id] = session
-                    # 重建用户会话索引
-                    if session.username not in self.user_sessions:
-                        self.user_sessions[session.username] = []
-                    if session_id not in self.user_sessions[session.username]:
-                        self.user_sessions[session.username].append(session_id)
-            
-            if session:
-                # 根据remember_me决定过期时间
-                expire_hours = self.remember_hours if session.remember_me else self.expire_hours
-                
-                # 检查是否过期
-                if time.time() - session.last_active > expire_hours * 3600:
-                    self.delete_session(session_id)
-                    return None
-                
-                # 更新最后活跃时间（每隔5分钟更新一次，减少IO）
-                if time.time() - session.last_active > 300:
-                    session.last_active = time.time()
-                    self._save_session(session)
-            
-            return session
-    
-    def delete_session(self, session_id: str):
-        """删除会话"""
-        with self.lock:
-            session = self.sessions.pop(session_id, None)
-            if session:
-                # 从用户的会话列表中移除
-                if session.username in self.user_sessions:
-                    try:
-                        self.user_sessions[session.username].remove(session_id)
-                        if not self.user_sessions[session.username]:
-                            del self.user_sessions[session.username]
-                    except ValueError:
-                        pass
-        
-        # 删除文件
-        self._delete_session_file(session_id)
-    
-    def delete_user_sessions(self, username: str):
-        """删除用户的所有会话（登出所有设备）"""
-        with self.lock:
-            session_ids = self.user_sessions.pop(username, [])
-            for sid in session_ids:
-                self.sessions.pop(sid, None)
-        
-        # 删除文件
-        for sid in session_ids:
-            self._delete_session_file(sid)
-    
-    def get_user_session_count(self, username: str) -> int:
-        """获取用户的活跃会话数"""
-        with self.lock:
-            return len(self.user_sessions.get(username, []))
-    
-    def cleanup_expired(self):
-        """清理过期会话"""
-        now = time.time()
-        expired = []
-        
-        # 扫描文件目录
-        try:
-            for file_path in self.storage_dir.glob("*.session"):
-                try:
-                    with open(file_path, 'rb') as f:
-                        session = pickle.load(f)
-                    
-                    expire_hours = self.remember_hours if session.remember_me else self.expire_hours
-                    if now - session.last_active > expire_hours * 3600:
-                        expired.append(session.session_id)
-                except:
-                    # 损坏的文件直接删除
-                    expired.append(file_path.stem)
-        except Exception as e:
-            print(f"扫描session文件失败: {e}")
-        
-        for sid in expired:
-            self.delete_session(sid)
-    
-    def get_expire_seconds(self, remember_me: bool = False) -> int:
-        """获取session过期时间（秒）"""
-        hours = self.remember_hours if remember_me else self.expire_hours
-        return int(hours * 3600)
-
-# 全局 Session 管理器（将在 BASE_DIR 定义后初始化）
 session_manager = None
 
 # 添加 Session 中间件（仅用于存储 session_id）
@@ -254,195 +70,8 @@ BASE_DIR = Path(__file__).resolve().parent
 SESSION_STORAGE_DIR = BASE_DIR / "sessions"
 session_manager = SessionManager(storage_dir=SESSION_STORAGE_DIR)
 
-
-def get_video_id(video_path: str) -> str:
-    """生成确定性的视频ID（使用MD5，跨进程一致）"""
-    return hashlib.md5(video_path.encode('utf-8')).hexdigest()[:16]
-
-
-# ==================== 下载状态检测 ====================
-
-def is_temp_file(file_path: str) -> bool:
-    """检查文件是否有临时下载后缀"""
-    # 检查文件本身的扩展名
-    _, ext = os.path.splitext(file_path)
-    if ext.lower() in DOWNLOADING_EXTENSIONS:
-        return True
-    
-    # 检查同目录下是否有对应的临时文件
-    # 例如 video.mp4.part 或 video.mp4.downloading
-    for temp_ext in DOWNLOADING_EXTENSIONS:
-        temp_path = file_path + temp_ext
-        if os.path.exists(temp_path):
-            return True
-    
-    return False
-
-
-def is_file_locked(file_path: str) -> bool:
-    """检查文件是否被其他进程占用/锁定（macOS/Linux）"""
-    try:
-        # 使用 lsof 检查文件是否被打开
-        result = subprocess.run(
-            ['lsof', '-f', '--', file_path],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        # lsof 返回非零表示文件未被打开，返回零且有输出表示被打开
-        if result.returncode == 0 and result.stdout.strip():
-            # 过滤掉当前进程
-            lines = result.stdout.strip().split('\n')
-            for line in lines[1:]:  # 跳过标题行
-                if line.strip():
-                    return True
-        return False
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        # lsof 不可用，尝试另一种方法
-        pass
-    
-    # 备用方法：尝试以独占模式打开文件
-    try:
-        # 尝试重命名文件来测试是否被锁定
-        test_path = file_path + '.locktest'
-        try:
-            os.rename(file_path, test_path)
-            os.rename(test_path, file_path)
-            return False
-        except OSError:
-            return True
-    except:
-        return False
-
-
-def is_file_growing(file_path: str) -> bool:
-    """检查文件大小是否在变化（表示正在下载）
-    
-    需要连续两次检查（间隔 FILE_SIZE_CHECK_INTERVAL 秒）且大小变化才返回 True
-    首次检查只记录状态，不判断为正在下载
-    """
-    if not os.path.exists(file_path):
-        return False
-    
-    try:
-        # 获取当前大小
-        current_size = os.path.getsize(file_path)
-        current_time = time.time()
-        
-        with FILE_SIZE_CACHE_LOCK:
-            cached = FILE_SIZE_CACHE.get(file_path)
-            
-            if cached:
-                time_diff = current_time - cached.get("checked_at", 0)
-                
-                # 必须超过检测间隔才能判断
-                if time_diff >= FILE_SIZE_CHECK_INTERVAL:
-                    if current_size != cached.get("size"):
-                        # 大小变化，正在下载，更新缓存
-                        FILE_SIZE_CACHE[file_path] = {
-                            "size": current_size,
-                            "checked_at": current_time
-                        }
-                        return True
-                    else:
-                        # 大小没变，更新时间戳，不是下载中
-                        FILE_SIZE_CACHE[file_path] = {
-                            "size": current_size,
-                            "checked_at": current_time
-                        }
-                        return False
-                else:
-                    # 还在等待间隔，返回上次结果（False，不确定）
-                    return False
-            
-            # 首次检查，只记录大小，不判断为下载中
-            FILE_SIZE_CACHE[file_path] = {
-                "size": current_size,
-                "checked_at": current_time
-            }
-            return False
-    except OSError:
-        return False
-
-
-def check_video_status(video_path: str) -> dict:
-    """
-    检查视频文件状态
-    返回: {
-        "status": "normal" | "downloading" | "corrupted",
-        "reason": str (可选，说明原因)
-    }
-    """
-    if not os.path.exists(video_path):
-        return {"status": "corrupted", "reason": "文件不存在"}
-    
-    # 1. 检查临时后缀
-    if is_temp_file(video_path):
-        return {"status": "downloading", "reason": "临时文件"}
-    
-    # 2. 检查文件是否被锁定
-    if is_file_locked(video_path):
-        return {"status": "downloading", "reason": "文件被占用"}
-    
-    # 3. 检查文件大小是否在变化
-    if is_file_growing(video_path):
-        return {"status": "downloading", "reason": "正在写入"}
-    
-    # 4. 检查视频完整性（快速检查）
-    try:
-        cmd = [
-            'ffprobe', '-v', 'error',
-            '-select_streams', 'v:0',
-            '-show_entries', 'stream=codec_name',
-            '-of', 'json',
-            video_path
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        
-        if result.returncode != 0:
-            return {"status": "corrupted", "reason": "无法读取视频流"}
-        
-        data = json.loads(result.stdout)
-        streams = data.get('streams', [])
-        
-        if not streams or not streams[0].get('codec_name'):
-            return {"status": "corrupted", "reason": "无视频流"}
-        
-        return {"status": "normal", "reason": None}
-        
-    except subprocess.TimeoutExpired:
-        return {"status": "corrupted", "reason": "检查超时"}
-    except json.JSONDecodeError:
-        return {"status": "corrupted", "reason": "解析失败"}
-    except FileNotFoundError:
-        # ffprobe 不可用，假设正常
-        return {"status": "normal", "reason": None}
-    except Exception as e:
-        return {"status": "corrupted", "reason": str(e)[:30]}
-
-
-# 缩略图缓存目录
 THUMBNAIL_DIR = BASE_DIR / "thumbnails"
 THUMBNAIL_DIR.mkdir(exist_ok=True)
-
-# 视频完整性检查缓存（内存缓存）
-# 结构: {video_id: {"valid": bool, "error": str, "checked_at": float, "info": dict}}
-VIDEO_INTEGRITY_CACHE: Dict[str, dict] = {}
-CACHE_LOCK = threading.Lock()
-CACHE_EXPIRE_HOURS = 24  # 缓存过期时间
-
-# 下载中文件检测临时后缀
-DOWNLOADING_EXTENSIONS = {
-    '.part', '.downloading', '.temp', '.crdownload', 
-    '.partial', '.download', '.!ut', '.opdownload',
-    '.xltd', '.td', '.tmp'
-}
-
-# 文件大小变化检测缓存
-# 结构: {video_path: {"size": int, "checked_at": float}}
-FILE_SIZE_CACHE: Dict[str, dict] = {}
-FILE_SIZE_CACHE_LOCK = threading.Lock()
-FILE_SIZE_CHECK_INTERVAL = 2.0  # 秒
 
 # ==================== 文件句柄缓存 ====================
 class FileHandleCache:
@@ -453,6 +82,13 @@ class FileHandleCache:
         self.ttl = ttl
         self.cache: OrderedDict[str, dict] = OrderedDict()
         self.lock = threading.RLock()
+        self.stats = {
+            "hits": 0,
+            "misses": 0,
+            "evictions": 0,
+            "opens": 0,
+            "dup_reads": 0,
+        }
     
     def get(self, file_path: str) -> Optional[io.BufferedReader]:
         """获取缓存的文件句柄"""
@@ -464,6 +100,7 @@ class FileHandleCache:
                     # 移到末尾（最近使用）
                     self.cache.move_to_end(file_path)
                     entry['accessed_at'] = time.time()
+                    self.stats["hits"] += 1
                     return entry['handle']
                 else:
                     # 过期，关闭并移除
@@ -472,6 +109,7 @@ class FileHandleCache:
                     except:
                         pass
                     del self.cache[file_path]
+            self.stats["misses"] += 1
         return None
     
     def put(self, file_path: str, handle: io.BufferedReader):
@@ -498,6 +136,48 @@ class FileHandleCache:
                     oldest_entry['handle'].close()
                 except:
                     pass
+                self.stats["evictions"] += 1
+
+    def get_reader(self, file_path: str) -> io.BufferedReader:
+        """获取用于当前请求的独立读取句柄（避免共享seek位置冲突）"""
+        with self.lock:
+            entry = self.cache.get(file_path)
+            if entry and (time.time() - entry['accessed_at'] < self.ttl):
+                self.cache.move_to_end(file_path)
+                entry['accessed_at'] = time.time()
+                self.stats["hits"] += 1
+                try:
+                    dup_fd = os.dup(entry["handle"].fileno())
+                    self.stats["dup_reads"] += 1
+                    return os.fdopen(dup_fd, "rb")
+                except Exception:
+                    try:
+                        entry["handle"].close()
+                    except:
+                        pass
+                    self.cache.pop(file_path, None)
+            else:
+                self.stats["misses"] += 1
+                if entry:
+                    try:
+                        entry["handle"].close()
+                    except:
+                        pass
+                    self.cache.pop(file_path, None)
+            handle = open(file_path, "rb")
+            self.stats["opens"] += 1
+            self.cache[file_path] = {"handle": handle, "accessed_at": time.time()}
+            self.cache.move_to_end(file_path)
+            while len(self.cache) > self.max_size:
+                _, oldest_entry = self.cache.popitem(last=False)
+                try:
+                    oldest_entry["handle"].close()
+                except:
+                    pass
+                self.stats["evictions"] += 1
+            dup_fd = os.dup(handle.fileno())
+            self.stats["dup_reads"] += 1
+            return os.fdopen(dup_fd, "rb")
     
     def close_all(self):
         """关闭所有缓存的文件句柄"""
@@ -568,450 +248,28 @@ class PrefetchBuffer:
 
 def open_file_with_cache(file_path: str) -> io.BufferedReader:
     """打开文件（优先使用缓存）"""
-    handle = file_handle_cache.get(file_path)
-    if handle:
-        # 检查文件是否仍然有效
-        try:
-            handle.seek(0, 2)  # 移到末尾测试
-            handle.seek(0)  # 回到开头
-            return handle
-        except:
-            # 文件句柄无效，重新打开
-            pass
-    
-    handle = open(file_path, 'rb')
-    file_handle_cache.put(file_path, handle)
-    return file_handle_cache.get(file_path) or handle
-
-# 视频扫描缓存（文件缓存）
-VIDEO_SCAN_CACHE_FILE = BASE_DIR / ".video_scan_cache"
-VIDEO_SCAN_CACHE: Dict[str, dict] = {}  # 结构: {"videos": [...], "scanned_at": float, "dir_mtimes": {...}}
-VIDEO_SCAN_CACHE_LOCK = threading.Lock()
-VIDEO_SCAN_CACHE_EXPIRE_HOURS = 1  # 缓存过期时间（小时）
+    return file_handle_cache.get_reader(file_path)
 
 # 静态文件和模板
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.mount("/thumbnails", StaticFiles(directory=THUMBNAIL_DIR), name="thumbnails")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
-# 添加自定义 Jinja2 过滤器
+
 def dirname_filter(path):
-    """获取路径的父目录"""
     if not path:
-        return ''
+        return ""
     return os.path.dirname(path)
 
-templates.env.filters['dirname'] = dirname_filter
 
+templates.env.filters["dirname"] = dirname_filter
 
-class VideoServer:
-    """视频服务器配置和工具类"""
-    
-    def __init__(self, config_path: str = "config.ini"):
-        self.config = configparser.ConfigParser()
-        self.config.read(config_path, encoding='utf-8')
-        
-        # 服务器配置
-        self.host = self.config.get('server', 'host', fallback='0.0.0.0')
-        self.port = self.config.getint('server', 'port', fallback=8000)
-        
-        # 认证配置
-        self.auth_enabled = self.config.getboolean('auth', 'enabled', fallback=False)
-        self.auth_username = self.config.get('auth', 'username', fallback='admin')
-        self.auth_password = self.config.get('auth', 'password', fallback='hx123456')
-        self.secret_key = self.config.get('auth', 'secret_key', fallback='videoserver-secret-key-change-in-production')
-        
-        # 视频目录
-        dirs_str = self.config.get('video', 'directories', fallback='~/Movies')
-        self.video_dirs = []
-        self.video_dir_names = {}  # 目录别名映射
-        for d in dirs_str.split(','):
-            d = d.strip()
-            if '=' in d:
-                # 支持别名: name=/path/to/dir
-                name, path = d.split('=', 1)
-                name = name.strip()
-                path = path.strip()
-            else:
-                name = os.path.basename(d)
-                path = d
-            
-            if path.startswith('~'):
-                path = os.path.expanduser(path)
-            
-            if os.path.isdir(path):
-                self.video_dirs.append(path)
-                self.video_dir_names[path] = name
-        
-        # 支持的格式
-        exts_str = self.config.get('video', 'extensions', fallback='mp4,mkv,avi,mov,wmv,flv,webm,m4v')
-        self.extensions = set(f'.{e.strip().lower().lstrip(".")}' for e in exts_str.split(','))
-        
-        # UI配置
-        self.videos_per_page = self.config.getint('ui', 'videos_per_page', fallback=30)
-    
-    def get_directories(self) -> List[dict]:
-        """获取配置的视频目录列表"""
-        dirs = []
-        for d in self.video_dirs:
-            name = self.video_dir_names.get(d, os.path.basename(d))
-            video_count = self._count_videos(d)
-            dirs.append({
-                'name': name,
-                'path': d,
-                'video_count': video_count,
-            })
-        return dirs
-    
-    def _count_videos(self, directory: str) -> int:
-        """计算目录中的视频数量"""
-        count = 0
-        try:
-            for root, _, files in os.walk(directory):
-                for f in files:
-                    if os.path.splitext(f)[1].lower() in self.extensions:
-                        count += 1
-        except:
-            pass
-        return count
-    
-    def list_directory(self, directory: str, relative_path: str = "") -> dict:
-        """列出指定目录下的文件夹和视频"""
-        if directory not in self.video_dirs:
-            # 检查是否是子目录
-            valid = False
-            for base_dir in self.video_dirs:
-                if directory.startswith(base_dir + os.sep):
-                    valid = True
-                    break
-            if not valid:
-                return {'error': '无效的目录'}
-        
-        full_path = os.path.join(directory, relative_path) if relative_path else directory
-        
-        if not os.path.exists(full_path):
-            return {'error': '目录不存在'}
-        
-        folders = []
-        videos = []
-        
-        try:
-            items = sorted(os.listdir(full_path), key=lambda x: x.lower())
-        except PermissionError:
-            return {'error': '无法访问该目录'}
-        
-        for item in items:
-            item_path = os.path.join(full_path, item)
-            item_rel_path = os.path.join(relative_path, item) if relative_path else item
-            
-            if os.path.isdir(item_path):
-                # 检查文件夹是否包含视频
-                has_videos = self._has_videos_recursive(item_path)
-                if has_videos:
-                    folders.append({
-                        'name': item,
-                        'path': item_rel_path,
-                        'type': 'folder',
-                    })
-            else:
-                ext = os.path.splitext(item)[1].lower()
-                if ext in self.extensions:
-                    # 跳过临时下载文件
-                    if is_temp_file(item_path):
-                        continue
-                    
-                    try:
-                        stat = os.stat(item_path)
-                        videos.append({
-                            'name': item,
-                            'path': item_path,
-                            'rel_path': item_rel_path,
-                            'size': stat.st_size,
-                            'size_mb': round(stat.st_size / (1024 * 1024), 1),
-                            'modified': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M'),
-                            'ext': ext[1:].upper(),
-                            'base_dir': directory,
-                        })
-                    except (OSError, IOError):
-                        continue
-        
-        return {
-            'folders': folders,
-            'videos': videos,
-            'current_path': relative_path,
-            'parent_path': os.path.dirname(relative_path) if relative_path else None,
-        }
-    
-    def _has_videos_recursive(self, directory: str, max_depth: int = 3) -> bool:
-        """检查目录是否包含视频文件（递归）"""
-        if max_depth <= 0:
-            return False
-        try:
-            for item in os.listdir(directory):
-                item_path = os.path.join(directory, item)
-                if os.path.isfile(item_path):
-                    if os.path.splitext(item)[1].lower() in self.extensions:
-                        return True
-                elif os.path.isdir(item_path):
-                    if self._has_videos_recursive(item_path, max_depth - 1):
-                        return True
-        except:
-            pass
-        return False
-    
-    def _get_dir_mtime(self, directory: str) -> float:
-        """获取目录及其子目录的最新修改时间"""
-        max_mtime = 0
-        try:
-            for root, dirs, files in os.walk(directory):
-                # 检查目录修改时间
-                try:
-                    mtime = os.stat(root).st_mtime
-                    max_mtime = max(max_mtime, mtime)
-                except:
-                    pass
-                # 检查文件修改时间
-                for f in files:
-                    try:
-                        mtime = os.stat(os.path.join(root, f)).st_mtime
-                        max_mtime = max(max_mtime, mtime)
-                    except:
-                        pass
-        except:
-            pass
-        return max_mtime
-    
-    def _load_scan_cache(self) -> dict:
-        """从文件加载扫描缓存"""
-        try:
-            if VIDEO_SCAN_CACHE_FILE.exists():
-                with open(VIDEO_SCAN_CACHE_FILE, 'rb') as f:
-                    return pickle.load(f)
-        except:
-            pass
-        return {}
-    
-    def _save_scan_cache(self, cache: dict):
-        """保存扫描缓存到文件"""
-        try:
-            with open(VIDEO_SCAN_CACHE_FILE, 'wb') as f:
-                pickle.dump(cache, f)
-        except:
-            pass
-    
-    def _is_cache_valid(self, cache: dict) -> bool:
-        """检查缓存是否有效"""
-        if not cache or 'scanned_at' not in cache or 'videos' not in cache:
-            return False
-        
-        # 检查时间过期
-        age_hours = (time.time() - cache.get('scanned_at', 0)) / 3600
-        if age_hours > VIDEO_SCAN_CACHE_EXPIRE_HOURS:
-            return False
-        
-        # 检查目录是否有变化
-        cached_mtimes = cache.get('dir_mtimes', {})
-        for base_dir in self.video_dirs:
-            current_mtime = self._get_dir_mtime(base_dir)
-            cached_mtime = cached_mtimes.get(base_dir, 0)
-            if current_mtime > cached_mtime:
-                return False
-        
-        return True
-    
-    def scan_videos(self, search: str = "", directory: str = None, use_cache: bool = True) -> list[dict]:
-        """扫描视频文件（支持缓存）"""
-        dirs_to_scan = [directory] if directory else self.video_dirs
-        cache_key = ",".join(sorted(dirs_to_scan))
-        
-        # 尝试使用缓存（仅当不搜索且使用全部目录时）
-        if use_cache and not search and not directory:
-            with VIDEO_SCAN_CACHE_LOCK:
-                cache = self._load_scan_cache()
-                if self._is_cache_valid(cache):
-                    return cache.get('videos', [])
-        
-        # 执行扫描
-        videos = []
-        
-        for base_dir in dirs_to_scan:
-            if not os.path.exists(base_dir):
-                continue
-            
-            for root, _, files in os.walk(base_dir):
-                for file in files:
-                    ext = os.path.splitext(file)[1].lower()
-                    if ext not in self.extensions:
-                        continue
-                    
-                    full_path = os.path.join(root, file)
-                    
-                    # 跳过临时下载文件
-                    if is_temp_file(full_path):
-                        continue
-                    
-                    # 搜索过滤
-                    if search and search.lower() not in file.lower():
-                        continue
-                    
-                    # 获取文件信息
-                    try:
-                        stat = os.stat(full_path)
-                        rel_path = os.path.relpath(full_path, base_dir)
-                        
-                        # 提取文件所在目录（相对路径的父目录）
-                        parent_dir = os.path.dirname(rel_path)
-                        
-                        videos.append({
-                            'name': file,
-                            'path': full_path,
-                            'rel_path': rel_path,
-                            'parent_dir': parent_dir if parent_dir else '',  # 空表示在根目录
-                            'size': stat.st_size,
-                            'size_mb': round(stat.st_size / (1024 * 1024), 1),
-                            'modified': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M'),
-                            'ext': ext[1:].upper(),
-                            'base_dir': base_dir,
-                        })
-                    except (OSError, IOError):
-                        continue
-        
-        # 按修改时间排序（最新在前）
-        videos.sort(key=lambda x: x['modified'], reverse=True)
-        
-        # 更新缓存（仅当不搜索且使用全部目录时）
-        if use_cache and not search and not directory:
-            dir_mtimes = {d: self._get_dir_mtime(d) for d in self.video_dirs}
-            with VIDEO_SCAN_CACHE_LOCK:
-                cache = {
-                    'videos': videos,
-                    'scanned_at': time.time(),
-                    'dir_mtimes': dir_mtimes,
-                }
-                self._save_scan_cache(cache)
-        
-        return videos
-    
-    def refresh_scan_cache(self):
-        """强制刷新扫描缓存"""
-        with VIDEO_SCAN_CACHE_LOCK:
-            # 删除旧缓存
-            if VIDEO_SCAN_CACHE_FILE.exists():
-                try:
-                    VIDEO_SCAN_CACHE_FILE.unlink()
-                except:
-                    pass
-        # 重新扫描
-        self.scan_videos(use_cache=False)
-    
-    def get_video_path(self, video_id: str) -> Optional[str]:
-        """根据视频ID获取路径"""
-        videos = self.scan_videos()
-        for v in videos:
-            # 使用确定性的ID匹配
-            if get_video_id(v['path']) == video_id:
-                return v['path']
-        return None
-    
-    def get_video_info(self, video_path: str) -> dict:
-        """获取视频详细信息（使用ffprobe）"""
-        info = {
-            'duration': None,
-            'duration_formatted': None,
-            'width': None,
-            'height': None,
-            'codec': None,
-            'bitrate': None,
-            'fps': None,
-        }
-        
-        try:
-            cmd = [
-                'ffprobe', '-v', 'quiet', '-print_format', 'json',
-                '-show_format', '-show_streams', video_path
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                
-                # 获取视频流信息
-                for stream in data.get('streams', []):
-                    if stream.get('codec_type') == 'video':
-                        info['width'] = stream.get('width')
-                        info['height'] = stream.get('height')
-                        info['codec'] = stream.get('codec_name')
-                        
-                        # 获取帧率
-                        fps_str = stream.get('r_frame_rate', '0/1')
-                        if '/' in fps_str:
-                            num, den = fps_str.split('/')
-                            if int(den) != 0:
-                                info['fps'] = round(int(num) / int(den), 2)
-                        break
-                
-                # 获取格式信息
-                fmt = data.get('format', {})
-                duration = float(fmt.get('duration', 0))
-                if duration > 0:
-                    info['duration'] = duration
-                    info['duration_formatted'] = self._format_duration(duration)
-                    info['bitrate'] = fmt.get('bit_rate')
-        
-        except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
-            pass
-        
-        return info
-    
-    def _format_duration(self, seconds: float) -> str:
-        """格式化时长"""
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        secs = int(seconds % 60)
-        
-        if hours > 0:
-            return f"{hours}:{minutes:02d}:{secs:02d}"
-        else:
-            return f"{minutes}:{secs:02d}"
-    
-    def get_thumbnail(self, video_path: str, timestamp: float = 5.0) -> Optional[str]:
-        """生成视频缩略图"""
-        # 使用视频路径的hash作为缓存文件名
-        video_hash = hashlib.md5(video_path.encode()).hexdigest()
-        thumb_path = THUMBNAIL_DIR / f"{video_hash}.jpg"
-        
-        # 如果缩略图已存在，直接返回
-        if thumb_path.exists():
-            return str(thumb_path)
-        
-        # 使用ffmpeg生成缩略图
-        try:
-            cmd = [
-                'ffmpeg', '-y', '-ss', str(timestamp),
-                '-i', video_path,
-                '-vframes', '1',
-                '-vf', 'scale=320:-1',
-                '-q:v', '3',
-                str(thumb_path)
-            ]
-            result = subprocess.run(cmd, capture_output=True, timeout=30)
-            
-            if result.returncode == 0 and thumb_path.exists():
-                return str(thumb_path)
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-        
-        return None
-
-
-# 全局配置实例
-video_server = VideoServer(str(BASE_DIR / "config.ini"))
-
-
-def get_mime_type(file_path: str) -> str:
-    """获取文件的MIME类型"""
-    mime_type, _ = mimetypes.guess_type(file_path)
-    return mime_type or 'application/octet-stream'
+video_server = VideoServer(
+    config_path=str(BASE_DIR / "config.ini"),
+    thumbnail_dir=THUMBNAIL_DIR,
+    scan_cache_file=BASE_DIR / ".video_scan_cache",
+    is_temp_file=is_temp_file,
+)
 
 
 # ==================== 认证相关 ====================
@@ -1127,10 +385,6 @@ async def index(
         if 'error' in browse_result:
             raise HTTPException(status_code=400, detail=browse_result['error'])
         
-        # 为视频生成ID
-        for v in browse_result['videos']:
-            v['id'] = get_video_id(v['path'])
-        
         return templates.TemplateResponse(
             "index.html",
             {
@@ -1156,10 +410,6 @@ async def index(
     start = (page - 1) * per_page
     videos = all_videos[start:start + per_page]
     
-    # 为每个视频生成ID
-    for v in videos:
-        v['id'] = get_video_id(v['path'])
-    
     return templates.TemplateResponse(
         "index.html",
         {
@@ -1181,13 +431,7 @@ async def play(request: Request, video_id: str):
     if video_server.auth_enabled and not get_current_user(request):
         return RedirectResponse(url="/login", status_code=302)
     
-    videos = video_server.scan_videos()
-    video = None
-    for v in videos:
-        if get_video_id(v['path']) == video_id:
-            video = v
-            break
-    
+    video = video_server.get_video_by_id(video_id)
     if not video:
         raise HTTPException(status_code=404, detail="视频不存在")
     
@@ -1200,12 +444,6 @@ async def play(request: Request, video_id: str):
         "play.html",
         {"request": request, "video": video}
     )
-
-
-def generate_etag(file_path: str) -> str:
-    """生成文件ETag（基于修改时间和大小）"""
-    stat = os.stat(file_path)
-    return f'"{stat.st_mtime}-{stat.st_size}"'
 
 
 def parse_range_header(range_header: str, file_size: int) -> list[tuple[int, int]]:
@@ -1273,20 +511,19 @@ async def stream_video(video_id: str, request: Request):
     if video_server.auth_enabled and not get_current_user(request):
         raise HTTPException(status_code=401, detail="未登录")
     
-    videos = video_server.scan_videos()
-    video_path = None
+    video_path = video_server.get_video_path(video_id)
     
-    for v in videos:
-        if get_video_id(v['path']) == video_id:
-            video_path = v['path']
-            break
-    
-    if not video_path or not os.path.exists(video_path):
+    if not video_path:
         raise HTTPException(status_code=404, detail="视频不存在")
-    
-    file_size = os.path.getsize(video_path)
+
+    try:
+        stat = os.stat(video_path)
+    except OSError:
+        raise HTTPException(status_code=404, detail="视频不存在")
+
+    file_size = stat.st_size
     mime_type = get_mime_type(video_path)
-    etag = generate_etag(video_path)
+    etag = f'"{stat.st_mtime}-{stat.st_size}"'
     
     # 基础响应头
     base_headers = {
@@ -1337,15 +574,9 @@ async def stream_video(video_id: str, request: Request):
         
         def iterfile_optimized():
             """优化的文件迭代器，支持预读缓冲"""
+            f = None
             try:
-                # 尝试使用缓存的文件句柄
-                f = file_handle_cache.get(video_path)
-                own_handle = False
-                
-                if f is None:
-                    f = open(video_path, 'rb')
-                    own_handle = True
-                
+                f = open_file_with_cache(video_path)
                 f.seek(start)
                 remaining = content_length
                 chunk_size = STREAM_CHUNK_SIZE
@@ -1366,15 +597,11 @@ async def stream_video(video_id: str, request: Request):
                     remaining -= len(data)
                     yield data
                 
-                # 缓存文件句柄
-                if own_handle:
-                    file_handle_cache.put(video_path, f)
-                    
             except Exception as e:
                 print(f"Stream error: {e}")
-                # 出错时确保关闭文件
+            finally:
                 try:
-                    if 'f' in locals() and f:
+                    if f:
                         f.close()
                 except:
                     pass
@@ -1394,26 +621,17 @@ async def stream_video(video_id: str, request: Request):
         # 无Range请求，返回完整文件
         def iterfile_full():
             """返回完整文件的迭代器"""
+            f = None
             try:
-                f = file_handle_cache.get(video_path)
-                own_handle = False
-                
-                if f is None:
-                    f = open(video_path, 'rb')
-                    own_handle = True
-                
+                f = open_file_with_cache(video_path)
                 chunk_size = STREAM_CHUNK_SIZE
                 while chunk := f.read(chunk_size):
                     yield chunk
-                
-                # 缓存文件句柄
-                if own_handle:
-                    file_handle_cache.put(video_path, f)
-                    
             except Exception as e:
                 print(f"Stream error: {e}")
+            finally:
                 try:
-                    if 'f' in locals() and f:
+                    if f:
                         f.close()
                 except:
                     pass
@@ -1432,8 +650,6 @@ async def stream_video(video_id: str, request: Request):
 async def api_videos(search: str = "", directory: str = None):
     """API: 获取视频列表"""
     videos = video_server.scan_videos(search, directory)
-    for v in videos:
-        v['id'] = get_video_id(v['path'])
     return {"videos": videos, "total": len(videos)}
 
 
@@ -1459,17 +675,20 @@ async def api_browse(
 @app.get("/api/video/info/{video_id}")
 async def api_video_info(video_id: str):
     """API: 获取视频详细信息"""
-    video_path = video_server.get_video_path(video_id)
-    if not video_path:
+    video = video_server.get_video_by_id(video_id)
+    if not video:
         raise HTTPException(status_code=404, detail="视频不存在")
-    
+    video_path = video["path"]
     info = video_server.get_video_info(video_path)
-    
-    # 获取基本文件信息
-    stat = os.stat(video_path)
-    info['size'] = stat.st_size
-    info['size_mb'] = round(stat.st_size / (1024 * 1024), 1)
-    info['modified'] = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
+    if "size" in video:
+        info['size'] = video['size']
+        info['size_mb'] = video.get('size_mb', round(video['size'] / (1024 * 1024), 1))
+        info['modified'] = video.get('modified')
+    else:
+        stat = os.stat(video_path)
+        info['size'] = stat.st_size
+        info['size_mb'] = round(stat.st_size / (1024 * 1024), 1)
+        info['modified'] = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
     
     return info
 
@@ -1517,6 +736,7 @@ async def api_cache_status():
         "file_handle_cache": {
             "size": len(file_handle_cache.cache),
             "max_size": file_handle_cache.max_size,
+            "stats": file_handle_cache.stats,
             "entries": [
                 {
                     "path": os.path.basename(k),
@@ -1526,8 +746,7 @@ async def api_cache_status():
             ]
         },
         "video_scan_cache": {
-            "exists": VIDEO_SCAN_CACHE_FILE.exists(),
-            "cache_size": len(VIDEO_SCAN_CACHE)
+            **video_server.get_scan_cache_status()
         }
     }
 
@@ -1630,94 +849,6 @@ async def api_logout_all_sessions(request: Request):
     }
 
 
-# ==================== 视频完整性检查 ====================
-
-def check_single_video_integrity(video_path: str) -> dict:
-    """检查单个视频文件的完整性"""
-    if not os.path.exists(video_path):
-        return {"valid": False, "error": "文件不存在"}
-    
-    try:
-        # 使用 ffprobe 快速检查
-        cmd = [
-            'ffprobe', '-v', 'error',
-            '-select_streams', 'v:0',
-            '-show_entries', 'stream=codec_name,width,height,duration',
-            '-of', 'json',
-            video_path
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        
-        if result.returncode != 0:
-            error_msg = result.stderr.strip() if result.stderr else "无法读取视频信息"
-            return {"valid": False, "error": error_msg[:100]}
-        
-        data = json.loads(result.stdout)
-        streams = data.get('streams', [])
-        
-        if not streams:
-            return {"valid": False, "error": "未找到视频流"}
-        
-        video_stream = streams[0]
-        
-        if not video_stream.get('codec_name'):
-            return {"valid": False, "error": "缺少编解码器信息"}
-        
-        return {
-            "valid": True,
-            "info": {
-                "codec": video_stream.get('codec_name'),
-                "width": video_stream.get('width'),
-                "height": video_stream.get('height'),
-                "duration": video_stream.get('duration'),
-            }
-        }
-        
-    except subprocess.TimeoutExpired:
-        return {"valid": False, "error": "检查超时"}
-    except json.JSONDecodeError:
-        return {"valid": False, "error": "解析视频信息失败"}
-    except FileNotFoundError:
-        return {"valid": False, "error": "ffprobe 未安装"}
-    except Exception as e:
-        return {"valid": False, "error": str(e)[:50]}
-
-
-def get_cached_integrity(video_id: str) -> Optional[dict]:
-    """获取缓存的完整性检查结果"""
-    with CACHE_LOCK:
-        cached = VIDEO_INTEGRITY_CACHE.get(video_id)
-        if cached:
-            # 检查是否过期
-            age_hours = (time.time() - cached.get("checked_at", 0)) / 3600
-            if age_hours < CACHE_EXPIRE_HOURS:
-                return cached
-    return None
-
-
-def set_cached_integrity(video_id: str, result: dict):
-    """缓存完整性检查结果"""
-    with CACHE_LOCK:
-        VIDEO_INTEGRITY_CACHE[video_id] = {
-            **result,
-            "checked_at": time.time()
-        }
-
-
-def background_check_videos(video_ids: List[str], video_paths: Dict[str, str]):
-    """后台批量检查视频完整性"""
-    for video_id in video_ids:
-        # 跳过已有缓存的
-        if get_cached_integrity(video_id):
-            continue
-        
-        video_path = video_paths.get(video_id)
-        if video_path:
-            result = check_single_video_integrity(video_path)
-            set_cached_integrity(video_id, result)
-            time.sleep(0.1)  # 避免IO过载
-
-
 @app.get("/api/video/integrity/{video_id}")
 async def get_video_integrity(video_id: str):
     """API: 获取单个视频完整性状态"""
@@ -1761,9 +892,11 @@ async def batch_check_video_status(request: Request):
         return {"results": {}}
     
     results = {}
+    target_ids = video_ids[:50]
+    video_paths = video_server.get_video_paths(target_ids)
     
-    for video_id in video_ids[:50]:  # 限制每次最多50个
-        video_path = video_server.get_video_path(video_id)
+    for video_id in target_ids:
+        video_path = video_paths.get(video_id)
         if video_path:
             results[video_id] = check_video_status(video_path)
         else:
@@ -1792,16 +925,20 @@ async def batch_check_integrity(
     pending = []
     video_paths = {}
     
-    # 收集需要检查的视频
+    uncached_ids = []
     for video_id in video_ids:
         cached = get_cached_integrity(video_id)
         if cached:
             results[video_id] = cached
         else:
-            video_path = video_server.get_video_path(video_id)
-            if video_path:
-                video_paths[video_id] = video_path
-                pending.append(video_id)
+            uncached_ids.append(video_id)
+
+    resolved_paths = video_server.get_video_paths(uncached_ids)
+    for video_id in uncached_ids:
+        video_path = resolved_paths.get(video_id)
+        if video_path:
+            video_paths[video_id] = video_path
+            pending.append(video_id)
     
     # 启动后台检查任务
     if pending:
@@ -1865,9 +1002,8 @@ async def delete_video(video_id: str, request: Request):
         if thumb_path.exists():
             thumb_path.unlink()
         
-        # 清除完整性缓存
-        with CACHE_LOCK:
-            VIDEO_INTEGRITY_CACHE.pop(video_id, None)
+        video_server.invalidate_video(video_id, video_path)
+        clear_integrity_cache(video_id)
         
         return {"success": True, "message": f"已删除: {os.path.basename(video_path)}"}
     except Exception as e:
