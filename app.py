@@ -511,6 +511,29 @@ async def index(
             "detail": f"{total_items} videos in the active library",
         }
 
+    def build_empty_state(browse_mode: bool) -> dict:
+        if search:
+            return {
+                "title": f'No matches for "{search}"',
+                "detail": "试试更短的关键词，或者直接回到全库重新浏览。",
+                "action_label": "Reset Search",
+                "action_href": "/",
+            }
+        if browse_mode and dir_path:
+            reset_params = {"browse": browse} if browse else {}
+            return {
+                "title": "This folder is quiet right now",
+                "detail": "当前子目录没有可显示的视频，可以返回上一级或回到目录根。",
+                "action_label": "Back to Folder Root",
+                "action_href": f"/?{urlencode(reset_params)}" if reset_params else "/",
+            }
+        return {
+            "title": "没有找到匹配的视频",
+            "detail": "你可以切换目录、调整搜索词，或者检查当前视频目录配置。",
+            "action_label": "Back to Library",
+            "action_href": "/",
+        }
+
     def build_curated_shelves(view_videos: list[dict], recent_candidates: list[dict]) -> list[dict]:
         shelves = [
             {
@@ -574,6 +597,7 @@ async def index(
                 "spotlight_lane": build_spotlight_lane(browse_videos, True),
                 "curated_shelves": build_curated_shelves(browse_videos, recent_videos),
                 "view_feedback": build_view_feedback(total_items, True),
+                "empty_state": build_empty_state(True),
             }
         )
     
@@ -613,6 +637,7 @@ async def index(
             "spotlight_lane": build_spotlight_lane(videos, False),
             "curated_shelves": build_curated_shelves(videos, recent_videos),
             "view_feedback": build_view_feedback(total, False),
+            "empty_state": build_empty_state(False),
         }
     )
 

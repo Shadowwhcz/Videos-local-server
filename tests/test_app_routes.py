@@ -63,6 +63,14 @@ def test_index_renders_search_view_feedback(client: AppClient):
     assert "1 matching title" in response.text
 
 
+def test_index_renders_contextual_empty_search_state(client: AppClient):
+    response = client.get("/?search=missing")
+    assert response.status_code == 200
+    assert "No matches for" in response.text
+    assert "missing" in response.text
+    assert "Reset Search" in response.text
+
+
 def test_refresh_library_endpoint_rebuilds_scan_cache(client: AppClient):
     response = client.post("/api/library/refresh")
     assert response.status_code == 200

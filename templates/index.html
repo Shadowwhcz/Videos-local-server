@@ -306,8 +306,9 @@
             {% else %}
             <div class="library-empty-state">
                 <i class="bi bi-film"></i>
-                <h4>没有找到匹配的视频</h4>
-                <p>你可以切换目录、调整搜索词，或者检查当前视频目录配置。</p>
+                <h4>{{ empty_state.title }}</h4>
+                <p>{{ empty_state.detail }}</p>
+                <a class="empty-state-action" href="{{ empty_state.action_href }}">{{ empty_state.action_label }}</a>
             </div>
             {% endif %}
 
