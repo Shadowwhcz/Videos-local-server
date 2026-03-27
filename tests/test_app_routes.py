@@ -26,6 +26,28 @@ def test_index_renders_directory_browser_rows(client: AppClient):
     assert "Season 1" in response.text
 
 
+def test_index_renders_library_insights_and_refresh_actions(client: AppClient):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Library Pulse" in response.text
+    assert "Refresh Library" in response.text
+    assert "Spotlight Lane" in response.text
+
+
+def test_index_renders_curated_shelves(client: AppClient):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Continue Watching" in response.text
+    assert "Recent Drops" in response.text
+
+
+def test_refresh_library_endpoint_rebuilds_scan_cache(client: AppClient):
+    response = client.post("/api/library/refresh")
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert client.refresh_tracker["calls"] == 1
+
+
 def test_play_renders_player_shell(client: AppClient):
     response = client.get("/play/video-1")
     assert response.status_code == 200
@@ -34,3 +56,5 @@ def test_play_renders_player_shell(client: AppClient):
     assert "Next Up" in response.text
     assert "Episode 2.mp4" in response.text
     assert "Episode 3.mp4" in response.text
+    assert "Now Streaming" in response.text
+    assert "Jump to Next" in response.text

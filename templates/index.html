@@ -38,6 +38,10 @@
         </form>
 
         <div class="library-actions">
+            <button type="button" class="library-icon-btn library-tool-btn" data-action="refresh-library" aria-label="刷新视频库">
+                <i class="bi bi-arrow-clockwise"></i>
+                <span>Refresh Library</span>
+            </button>
             <span class="library-user">{{ current_user }}</span>
             <a href="/logout" class="library-icon-btn" aria-label="退出登录">
                 <i class="bi bi-box-arrow-right"></i>
@@ -71,6 +75,11 @@
                     <span>{% if continue_video %}{{ continue_video.modified }}{% else %}准备播放{% endif %}</span>
                     <span>{{ total }} 个视频</span>
                 </div>
+                <div class="hero-context-chips">
+                    {% for chip in context_chips %}
+                    <span class="hero-context-chip">{{ chip }}</span>
+                    {% endfor %}
+                </div>
             </div>
             <div class="hero-visual">
                 <div class="hero-poster-frame">
@@ -101,7 +110,85 @@
             </div>
         </section>
 
+        <section class="library-insights-panel">
+            <div class="library-section-head">
+                <div>
+                    <p class="toolbar-label">Library Pulse</p>
+                    <h3>Spotlight Lane</h3>
+                </div>
+                <span>{{ spotlight_lane.detail }}</span>
+            </div>
+            <div class="library-insights-grid">
+                {% for insight in library_insights %}
+                <article class="insight-card">
+                    <span class="insight-label">{{ insight.label }}</span>
+                    <strong>{{ insight.value }}</strong>
+                    <small>{{ insight.meta }}</small>
+                </article>
+                {% endfor %}
+                <article class="insight-card insight-card-spotlight">
+                    <span class="insight-label">Spotlight Lane</span>
+                    <strong>{{ spotlight_lane.title }}</strong>
+                    <small>{{ spotlight_lane.count }} items are feeding this lane right now.</small>
+                </article>
+            </div>
+        </section>
+
+        <section class="curated-shelves-panel">
+            <div class="library-section-head">
+                <div>
+                    <p class="toolbar-label">Curated Shelves</p>
+                    <h3>Continue Watching</h3>
+                </div>
+                <span>来自本机浏览器的播放进度会在这里继续接力。</span>
+            </div>
+            <div id="continueWatchingShelf" class="curated-shelf-grid curated-shelf-grid-continue">
+                <div class="curated-shelf-empty">
+                    <i class="bi bi-play-btn"></i>
+                    <span>继续观看记录会在播放过视频后出现。</span>
+                </div>
+            </div>
+            <script id="continueWatchingSeed" type="application/json">{{ recent_videos | tojson }}</script>
+
+            {% for shelf in curated_shelves %}
+                <div class="curated-shelf-block">
+                    <div class="library-section-head">
+                        <div>
+                            <p class="toolbar-label">Curated Shelf</p>
+                            <h3>{{ shelf["title"] }}</h3>
+                        </div>
+                        <span>{{ shelf["subtitle"] }}</span>
+                    </div>
+                    <div class="curated-shelf-grid">
+                    {% for item in shelf["items"] %}
+                    <a class="curated-shelf-card" href="/play/{{ item.id }}">
+                        <div class="curated-shelf-thumb">
+                            <img src="{{ item.poster_url or ('/api/video/thumbnail/' ~ item.id) }}" alt="{{ item.name }}" onerror="this.style.display='none'">
+                            <div class="curated-shelf-fallback"><i class="bi bi-film"></i></div>
+                        </div>
+                        <div class="curated-shelf-copy">
+                            <strong>{{ item.name }}</strong>
+                            <span>{{ item.parent_dir or item.rel_path }}</span>
+                        </div>
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </section>
+
         <section class="directory-browser">
+            <div class="directory-browser-head">
+                <div>
+                    <p class="toolbar-label">Browse State</p>
+                    <h3>Current Lane</h3>
+                </div>
+                <div class="directory-state-chips">
+                    {% for chip in context_chips %}
+                    <span class="directory-state-chip">{{ chip }}</span>
+                    {% endfor %}
+                </div>
+            </div>
             <div class="directory-breadcrumbs">
                 <a href="/"><i class="bi bi-house-door"></i>首页</a>
                 {% if current_browse %}

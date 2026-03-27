@@ -14,14 +14,23 @@ class AppClient:
     def get(self, path: str) -> httpx.Response:
         return asyncio.run(self._get(path))
 
+    def post(self, path: str, json: dict | None = None) -> httpx.Response:
+        return asyncio.run(self._post(path, json=json))
+
     async def _get(self, path: str) -> httpx.Response:
         transport = httpx.ASGITransport(app=self.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
             return await client.get(path)
 
+    async def _post(self, path: str, json: dict | None = None) -> httpx.Response:
+        transport = httpx.ASGITransport(app=self.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.post(path, json=json)
+
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
+    refresh_tracker = {"calls": 0}
     library_root = "/library"
     media_files = {
         "video-1": tmp_path / "sample.mp4",
@@ -128,4 +137,12 @@ def client(tmp_path, monkeypatch):
         "get_video_path",
         lambda video_id: str(media_files[video_id]) if video_id in media_files else None,
     )
-    return AppClient(app_module.app)
+    monkeypatch.setattr(
+        app_module.video_server,
+        "refresh_scan_cache",
+        lambda: refresh_tracker.__setitem__("calls", refresh_tracker["calls"] + 1),
+    )
+
+    client = AppClient(app_module.app)
+    client.refresh_tracker = refresh_tracker
+    return client

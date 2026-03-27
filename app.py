@@ -395,6 +395,7 @@ async def index(
         return RedirectResponse(url="/login", status_code=302)
     
     directories = video_server.get_directories()
+    current_user = get_actor_name(request)
 
     def enrich_video(video: dict) -> dict:
         video_data = dict(video)
@@ -433,6 +434,82 @@ async def index(
             "next_url": build_page_url(page + 1) if page < total_page_count else None,
             "summary": f"第 {start_item}-{end_item} 项 / 共 {total_items} 项",
         }
+
+    def build_library_insights(view_videos: list[dict], total_items: int, browse_mode: bool) -> list[dict]:
+        lane_label = "Folder View" if browse_mode else ("Search Results" if search else "Full Library")
+        return [
+            {"label": "Visible Now", "value": str(len(view_videos)), "meta": "当前画面"},
+            {"label": "Directory Sets", "value": str(len(directories)), "meta": "已连接片库"},
+            {"label": "Active Lane", "value": lane_label, "meta": "浏览模式"},
+            {"label": "Library Crew", "value": current_user, "meta": f"总计 {total_items} 项"},
+        ]
+
+    def build_context_chips(total_items: int, browse_mode: bool) -> list[str]:
+        chips = []
+        if browse_mode:
+            chips.append("Directory Browser")
+        elif search:
+            chips.append(f"Search: {search}")
+        else:
+            chips.append("All Media")
+
+        if current_browse := browse:
+            base_name = next((directory["name"] for directory in directories if directory["path"] == current_browse), "Directory")
+            chips.append(base_name)
+
+        if dir_path:
+            chips.append(dir_path)
+
+        chips.append(f"{total_items} Videos")
+        return chips
+
+    def build_spotlight_lane(view_videos: list[dict], browse_mode: bool) -> dict:
+        if search:
+            title = "Search Spotlight"
+            detail = f"正在聚焦与 “{search}” 相关的片段。"
+        elif browse_mode and dir_path:
+            title = "Folder Stream"
+            detail = f"当前停靠在 {dir_path}，继续向下浏览这一层目录。"
+        elif browse_mode and browse:
+            base_name = next((directory["name"] for directory in directories if directory["path"] == browse), "Directory")
+            title = "Directory Current"
+            detail = f"{base_name} 正在作为主浏览航道显示。"
+        else:
+            title = "Fresh Intake"
+            detail = "新入库与最近更新内容会优先出现在这一屏。"
+
+        return {
+            "title": title,
+            "detail": detail,
+            "count": len(view_videos),
+        }
+
+    def build_curated_shelves(view_videos: list[dict], recent_candidates: list[dict]) -> list[dict]:
+        shelves = [
+            {
+                "title": "Recent Drops",
+                "subtitle": "刚更新或刚入库的内容优先在这里出现。",
+                "items": recent_candidates[:6],
+            }
+        ]
+
+        folder_picks = []
+        featured_parent = (view_videos[0].get("parent_dir") if view_videos else "") or ""
+        if featured_parent:
+            folder_picks = [video for video in view_videos if video.get("parent_dir") == featured_parent][:6]
+        elif len(view_videos) > 1:
+            folder_picks = view_videos[1:7]
+
+        if folder_picks:
+            shelves.append(
+                {
+                    "title": "Folder Picks",
+                    "subtitle": "沿着当前目录继续往下看，不用重新筛选。",
+                    "items": folder_picks,
+                }
+            )
+
+        return shelves
     
     # 如果指定了浏览目录
     if browse:
@@ -441,6 +518,8 @@ async def index(
             raise HTTPException(status_code=400, detail=browse_result['error'])
         
         browse_videos = [enrich_video(video) for video in browse_result.get("videos", [])]
+        total_items = len(browse_videos)
+        recent_videos = browse_videos[:12]
         return templates.TemplateResponse(
             request,
             "index.html",
@@ -453,16 +532,20 @@ async def index(
                 "videos": browse_videos,
                 "featured_video": browse_videos[0] if browse_videos else None,
                 "continue_video": browse_videos[0] if browse_videos else None,
-                "recent_videos": browse_videos[:12],
+                "recent_videos": recent_videos,
                 "search": search,
                 "page": page,
                 "current_browse": browse,
                 "current_path": dir_path,
                 "directory_browse_mode": True,
-                "current_user": get_actor_name(request),
-                "total": len(browse_videos),
+                "current_user": current_user,
+                "total": total_items,
                 "total_pages": 1,
                 "pagination": None,
+                "library_insights": build_library_insights(browse_videos, total_items, True),
+                "context_chips": build_context_chips(total_items, True),
+                "spotlight_lane": build_spotlight_lane(browse_videos, True),
+                "curated_shelves": build_curated_shelves(browse_videos, recent_videos),
             }
         )
     
@@ -492,11 +575,15 @@ async def index(
             "page": page,
             "total_pages": total_pages,
             "total": total,
-            "current_user": get_actor_name(request),
+            "current_user": current_user,
             "current_browse": "",
             "current_path": "",
             "directory_browse_mode": False,
             "pagination": build_pagination(total, total_pages),
+            "library_insights": build_library_insights(videos, total, False),
+            "context_chips": build_context_chips(total, False),
+            "spotlight_lane": build_spotlight_lane(videos, False),
+            "curated_shelves": build_curated_shelves(videos, recent_videos),
         }
     )
 
@@ -524,6 +611,8 @@ async def play(request: Request, video_id: str):
         next_up_videos.append(candidate)
         if len(next_up_videos) >= 6:
             break
+
+    jump_to_next = next_up_videos[0] if next_up_videos else None
     
     return templates.TemplateResponse(
         request,
@@ -532,6 +621,7 @@ async def play(request: Request, video_id: str):
             "video": video,
             "next_up_videos": next_up_videos,
             "current_user": get_actor_name(request),
+            "jump_to_next": jump_to_next,
         }
     )
 
@@ -838,6 +928,22 @@ async def api_cache_status():
         "video_scan_cache": {
             **video_server.get_scan_cache_status()
         }
+    }
+
+
+@app.post("/api/library/refresh")
+async def refresh_library(request: Request):
+    """API: 手动刷新视频扫描缓存"""
+    if video_server.auth_enabled and not get_current_user(request):
+        raise HTTPException(status_code=401, detail="未登录")
+
+    video_server.refresh_scan_cache()
+    total_videos = len(video_server.scan_videos())
+    return {
+        "success": True,
+        "message": "视频库已刷新",
+        "total_videos": total_videos,
+        "refreshed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
 @app.get("/api/session/status")

@@ -49,6 +49,23 @@
                         <source src="/stream/{{ video.id }}" type="video/{{ video.ext|lower }}">
                         您的浏览器不支持视频播放，请使用现代浏览器。
                     </video>
+                    <div class="player-overlay-panel">
+                        <div class="player-overlay-copy">
+                            <span class="player-overlay-kicker">Now Streaming</span>
+                            <strong>{{ video.name }}</strong>
+                            <div class="player-overlay-meta">
+                                <span>{{ video.parent_dir or "Root Library" }}</span>
+                                <span>{{ video.modified }}</span>
+                                <span>{{ video.duration_formatted or "--:--" }}</span>
+                            </div>
+                        </div>
+                        {% if jump_to_next %}
+                        <a class="player-overlay-action" href="/play/{{ jump_to_next.id }}">
+                            <span>Jump to Next</span>
+                            <strong>{{ jump_to_next.name }}</strong>
+                        </a>
+                        {% endif %}
+                    </div>
                     <button class="mobile-fullscreen-btn" id="mobileFullscreenBtn" aria-label="全屏">
                         <i class="bi bi-arrows-fullscreen"></i>
                     </button>

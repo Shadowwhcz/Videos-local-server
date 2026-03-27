@@ -2492,6 +2492,31 @@ footer small {
     box-shadow: inset 0 0 0 1px rgba(129, 236, 255, 0.14);
 }
 
+.library-tool-btn {
+    width: auto;
+    padding: 0 1rem;
+    gap: 0.55rem;
+    color: #ffffff;
+    border: 0;
+    cursor: pointer;
+}
+
+.library-tool-btn span {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.library-tool-btn.is-loading {
+    opacity: 0.8;
+    box-shadow: inset 0 0 0 1px rgba(129, 236, 255, 0.24), 0 0 20px rgba(129, 236, 255, 0.16);
+}
+
+.library-tool-btn:disabled {
+    cursor: wait;
+}
+
 .library-canvas,
 .player-layout {
     position: relative;
@@ -2591,6 +2616,32 @@ footer small {
     letter-spacing: 0.14em;
 }
 
+.hero-context-chips,
+.directory-state-chips,
+.player-overlay-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+}
+
+.hero-context-chips {
+    margin-top: 1.1rem;
+}
+
+.hero-context-chip,
+.directory-state-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.4rem 0.72rem;
+    border-radius: 999px;
+    background: rgba(13, 33, 52, 0.74);
+    box-shadow: inset 0 0 0 1px rgba(129, 236, 255, 0.08);
+    color: #dff4ff;
+    font-size: 0.76rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
 .hero-visual {
     display: flex;
     justify-content: flex-end;
@@ -2634,6 +2685,7 @@ footer small {
 .library-toolbar,
 .directory-browser,
 .library-grid-section,
+.library-insights-panel,
 .player-panel {
     border-radius: 1.35rem;
     padding: 1.25rem;
@@ -2674,6 +2726,160 @@ footer small {
 .directory-browser {
     display: grid;
     gap: 1rem;
+}
+
+.library-insights-panel {
+    display: grid;
+    gap: 1rem;
+}
+
+.curated-shelves-panel {
+    display: grid;
+    gap: 1.25rem;
+    border-radius: 1.35rem;
+    padding: 1.25rem;
+    background: rgba(8, 27, 44, 0.72);
+    box-shadow: inset 0 0 0 1px rgba(129, 236, 255, 0.08);
+}
+
+.library-insights-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.9rem;
+}
+
+.insight-card {
+    display: grid;
+    gap: 0.45rem;
+    padding: 1rem;
+    border-radius: 1rem;
+    background: rgba(13, 33, 52, 0.7);
+    box-shadow: inset 0 0 0 1px rgba(129, 236, 255, 0.08);
+}
+
+.insight-card-spotlight {
+    background:
+        radial-gradient(circle at top right, rgba(172, 137, 255, 0.24), transparent 45%),
+        rgba(13, 33, 52, 0.78);
+}
+
+.insight-label {
+    color: #81ecff;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.insight-card strong {
+    font-size: 1.15rem;
+    line-height: 1.15;
+    letter-spacing: -0.03em;
+}
+
+.insight-card small {
+    color: #9eacc0;
+    line-height: 1.5;
+}
+
+.curated-shelf-block {
+    display: grid;
+    gap: 0.9rem;
+}
+
+.curated-shelf-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.9rem;
+}
+
+.curated-shelf-card {
+    display: grid;
+    grid-template-columns: 8rem 1fr;
+    gap: 0.85rem;
+    align-items: center;
+    padding: 0.8rem;
+    border-radius: 1rem;
+    text-decoration: none;
+    color: #ffffff;
+    background: rgba(13, 33, 52, 0.72);
+    box-shadow: inset 0 0 0 1px rgba(129, 236, 255, 0.08);
+}
+
+.curated-shelf-thumb {
+    position: relative;
+    min-height: 5rem;
+    border-radius: 0.85rem;
+    overflow: hidden;
+    background: rgba(1, 8, 16, 0.8);
+}
+
+.curated-shelf-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.curated-shelf-fallback {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(129, 236, 255, 0.5);
+    font-size: 1.6rem;
+}
+
+.curated-shelf-copy {
+    display: grid;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+.curated-shelf-copy strong {
+    font-size: 0.95rem;
+    line-height: 1.3;
+}
+
+.curated-shelf-copy span {
+    color: #9eacc0;
+    font-size: 0.8rem;
+    line-height: 1.4;
+}
+
+.curated-shelf-empty {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 1rem 1.1rem;
+    border-radius: 1rem;
+    color: #9eacc0;
+    background: rgba(13, 33, 52, 0.62);
+}
+
+.continue-progress-bar {
+    position: absolute;
+    left: 0.65rem;
+    right: 0.65rem;
+    bottom: 0.65rem;
+    height: 0.3rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.14);
+    overflow: hidden;
+}
+
+.continue-progress-bar span {
+    display: block;
+    width: 42%;
+    height: 100%;
+    background: linear-gradient(90deg, #81ecff, #ac89ff);
+}
+
+.directory-browser-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: flex-end;
 }
 
 .directory-breadcrumbs {
@@ -2931,6 +3137,7 @@ footer small {
 }
 
 .player-stage-media {
+    position: relative;
     border-radius: 1.2rem;
     overflow: hidden;
 }
@@ -2945,6 +3152,82 @@ footer small {
     max-height: 72vh;
     background: #000;
     display: block;
+}
+
+.player-overlay-panel {
+    position: absolute;
+    left: 1rem;
+    right: 1rem;
+    bottom: 1rem;
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: flex-end;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.player-overlay-copy,
+.player-overlay-action {
+    pointer-events: auto;
+}
+
+.player-overlay-copy {
+    max-width: min(36rem, 100%);
+    display: grid;
+    gap: 0.5rem;
+    padding: 1rem 1.1rem;
+    border-radius: 1rem;
+    background: linear-gradient(180deg, rgba(2, 15, 30, 0.44), rgba(2, 15, 30, 0.84));
+    backdrop-filter: blur(16px);
+}
+
+.player-overlay-kicker {
+    color: #81ecff;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+}
+
+.player-overlay-copy strong {
+    font-size: 1.2rem;
+    line-height: 1.2;
+}
+
+.player-overlay-meta span {
+    padding: 0.35rem 0.6rem;
+    border-radius: 999px;
+    background: rgba(129, 236, 255, 0.12);
+    color: #dff4ff;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.player-overlay-action {
+    display: grid;
+    gap: 0.3rem;
+    min-width: 13rem;
+    padding: 0.95rem 1rem;
+    border-radius: 1rem;
+    text-decoration: none;
+    background: linear-gradient(135deg, rgba(129, 236, 255, 0.2), rgba(172, 137, 255, 0.18));
+    color: #ffffff;
+    box-shadow: inset 0 0 0 1px rgba(129, 236, 255, 0.12);
+}
+
+.player-overlay-action span {
+    color: #81ecff;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.player-overlay-action strong {
+    font-size: 0.95rem;
+    line-height: 1.35;
 }
 
 .player-detail-grid {
@@ -3059,6 +3342,20 @@ footer small {
         grid-template-columns: 1fr;
     }
 
+    .library-insights-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .curated-shelf-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .directory-browser-head,
+    .player-overlay-panel {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
     .hero-visual {
         justify-content: stretch;
     }
@@ -3082,6 +3379,8 @@ footer small {
 
     .hero-spotlight,
     .library-toolbar,
+    .library-insights-panel,
+    .curated-shelves-panel,
     .directory-browser,
     .library-grid-section,
     .library-pagination,
@@ -3099,7 +3398,8 @@ footer small {
 
     .toolbar-stats,
     .player-panel-head,
-    .library-section-head {
+    .library-section-head,
+    .directory-browser-head {
         align-items: flex-start;
         flex-direction: column;
     }
@@ -3126,6 +3426,25 @@ footer small {
         padding: 0.75rem 0.9rem;
     }
 
+    .library-insights-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .curated-shelf-card {
+        grid-template-columns: 6.5rem 1fr;
+    }
+
+    .library-tool-btn {
+        width: 100%;
+        justify-content: center;
+        height: 3rem;
+    }
+
+    .hero-context-chips,
+    .directory-state-chips {
+        gap: 0.5rem;
+    }
+
     .player-detail-grid {
         grid-template-columns: 1fr;
     }
@@ -3136,5 +3455,22 @@ footer small {
 
     .player-shell .player-wrapper video {
         max-height: 48vh;
+    }
+
+    .player-overlay-panel {
+        left: 0.75rem;
+        right: 0.75rem;
+        bottom: 0.75rem;
+        gap: 0.75rem;
+    }
+
+    .player-overlay-copy,
+    .player-overlay-action {
+        padding: 0.85rem 0.9rem;
+        border-radius: 0.9rem;
+    }
+
+    .player-overlay-copy strong {
+        font-size: 1rem;
     }
 }

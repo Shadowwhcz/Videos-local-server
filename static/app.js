@@ -58,6 +58,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (document.querySelector('.media-library-shell')) {
             initSearch();
+            initLibraryActions();
+            initContinueWatchingShelf();
             initVideoCards();
             initThumbnails();
             initDeleteButtons();
@@ -106,6 +108,96 @@ function initSearch() {
             }
         });
     }
+}
+
+function initLibraryActions() {
+    document.querySelectorAll('[data-action="refresh-library"]').forEach(button => {
+        button.addEventListener('click', async () => {
+            if (button.disabled) return;
+
+            const label = button.querySelector('span');
+            const originalLabel = label ? label.textContent : '';
+            button.disabled = true;
+            button.classList.add('is-loading');
+            if (label) {
+                label.textContent = 'Refreshing...';
+            }
+
+            try {
+                const response = await fetch('/api/library/refresh', { method: 'POST' });
+                if (!response.ok) {
+                    throw new Error('refresh_failed');
+                }
+                window.location.reload();
+            } catch (error) {
+                if (label) {
+                    label.textContent = 'Retry Refresh';
+                }
+                button.classList.remove('is-loading');
+                button.disabled = false;
+                setTimeout(() => {
+                    if (label) {
+                        label.textContent = originalLabel || 'Refresh Library';
+                    }
+                }, 1800);
+            }
+        });
+    });
+}
+
+function initContinueWatchingShelf() {
+    const shelf = document.getElementById('continueWatchingShelf');
+    const seed = document.getElementById('continueWatchingSeed');
+    if (!shelf || !seed) return;
+
+    let candidates = [];
+    try {
+        candidates = JSON.parse(seed.textContent || '[]');
+    } catch (error) {
+        candidates = [];
+    }
+
+    const progressItems = candidates
+        .map((video) => {
+            const rawPosition = localStorage.getItem(`video_pos_${video.id}`);
+            const position = rawPosition ? parseFloat(rawPosition) : 0;
+            return position > 0 ? { video, position } : null;
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.position - a.position)
+        .slice(0, 6);
+
+    if (progressItems.length === 0) {
+        return;
+    }
+
+    shelf.innerHTML = progressItems.map(({ video, position }) => {
+        const minutes = Math.floor(position / 60);
+        const seconds = Math.floor(position % 60).toString().padStart(2, '0');
+        const posterUrl = video.poster_url || `/api/video/thumbnail/${video.id}`;
+        return `
+            <a class="curated-shelf-card continue-card" href="/play/${video.id}">
+                <div class="curated-shelf-thumb">
+                    <img src="${posterUrl}" alt="${escapeHtml(video.name)}" onerror="this.style.display='none'">
+                    <div class="curated-shelf-fallback"><i class="bi bi-play-circle"></i></div>
+                    <div class="continue-progress-bar"><span></span></div>
+                </div>
+                <div class="curated-shelf-copy">
+                    <strong>${escapeHtml(video.name)}</strong>
+                    <span>Resume from ${minutes}:${seconds}</span>
+                </div>
+            </a>
+        `;
+    }).join('');
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 /**
