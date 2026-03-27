@@ -33,6 +33,11 @@ logs/
 *.temp
 .cache/
 
+# Local-only workspace materials
+AGENTS.md
+stitch/
+docs/superpowers/plans/
+
 # Video scan cache
 .video_scan_cache
 
