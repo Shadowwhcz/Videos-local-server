@@ -2469,6 +2469,7 @@ footer small {
     align-items: center;
     gap: 0.9rem;
     justify-self: end;
+    flex-wrap: wrap;
 }
 
 .library-user,
@@ -2477,6 +2478,16 @@ footer small {
     font-size: 0.84rem;
     text-transform: uppercase;
     letter-spacing: 0.16em;
+}
+
+.library-user {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.4rem;
+    padding: 0 0.85rem;
+    border-radius: 999px;
+    background: rgba(13, 33, 52, 0.64);
+    box-shadow: inset 0 0 0 1px rgba(129, 236, 255, 0.08);
 }
 
 .library-icon-btn {
@@ -2793,6 +2804,10 @@ footer small {
     gap: 0.9rem;
 }
 
+.curated-shelf-grid-continue {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .curated-shelf-card {
     display: grid;
     grid-template-columns: 8rem 1fr;
@@ -2804,6 +2819,12 @@ footer small {
     color: #ffffff;
     background: rgba(13, 33, 52, 0.72);
     box-shadow: inset 0 0 0 1px rgba(129, 236, 255, 0.08);
+}
+
+.continue-card {
+    background:
+        radial-gradient(circle at top right, rgba(129, 236, 255, 0.18), transparent 42%),
+        rgba(13, 33, 52, 0.82);
 }
 
 .curated-shelf-thumb {
@@ -3384,6 +3405,10 @@ footer small {
         padding: 0.9rem 1rem;
     }
 
+    .library-topbar {
+        gap: 0.85rem;
+    }
+
     .hero-spotlight,
     .library-toolbar,
     .library-insights-panel,
@@ -3401,6 +3426,11 @@ footer small {
     .hero-empty h1,
     .player-stage-copy h1 {
         font-size: 2.2rem;
+    }
+
+    .hero-actions {
+        display: grid;
+        grid-template-columns: 1fr;
     }
 
     .toolbar-stats,
@@ -3437,14 +3467,54 @@ footer small {
         grid-template-columns: 1fr;
     }
 
+    .curated-shelf-grid {
+        display: flex;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        padding-bottom: 0.25rem;
+    }
+
+    .curated-shelf-card,
+    .curated-shelf-empty {
+        flex: 0 0 min(84vw, 20rem);
+        scroll-snap-align: start;
+    }
+
     .curated-shelf-card {
-        grid-template-columns: 6.5rem 1fr;
+        grid-template-columns: 6.25rem 1fr;
+        min-height: 7rem;
+    }
+
+    .curated-shelf-copy strong {
+        font-size: 0.9rem;
+    }
+
+    .curated-shelf-copy span,
+    .curated-shelf-copy small {
+        font-size: 0.72rem;
     }
 
     .library-tool-btn {
         width: 100%;
         justify-content: center;
         height: 3rem;
+    }
+
+    .library-tool-btn span {
+        font-size: 0.72rem;
+        letter-spacing: 0.06em;
+    }
+
+    .library-actions {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.65rem;
+        align-items: center;
+    }
+
+    .library-user {
+        grid-column: 1 / -1;
+        justify-self: start;
     }
 
     .hero-context-chips,
@@ -3464,6 +3534,10 @@ footer small {
         max-height: 48vh;
     }
 
+    .player-stage-copy {
+        display: none;
+    }
+
     .player-overlay-panel {
         left: 0.75rem;
         right: 0.75rem;
@@ -3479,5 +3553,13 @@ footer small {
 
     .player-overlay-copy strong {
         font-size: 1rem;
+    }
+
+    .player-overlay-meta span {
+        font-size: 0.68rem;
+    }
+
+    .player-overlay-action {
+        min-width: 0;
     }
 }
