@@ -3,468 +3,127 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#0f0f1a">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#020f1e">
     <title>{{ video.name }} - 本地视频库</title>
-    
-    <!-- Preconnect -->
-    <link rel="preconnect" href="https://cdn.jsdelivr.net">
-    
-    <!-- Bootstrap 5 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css" rel="stylesheet">
-    <!-- Custom styles -->
     <link href="/static/style.css" rel="stylesheet">
-    
-    <!-- Player-specific styles -->
-    <style>
-        .player-wrapper {
-            background: #000;
-            border-radius: var(--radius-lg);
-            overflow: hidden;
-            box-shadow: var(--shadow-lg);
-            position: relative;
-        }
-        
-        .player-wrapper video {
-            width: 100%;
-            display: block;
-            background: #000;
-            max-height: 75vh;
-        }
-        
-        /* Mobile player optimization */
-        @media (max-width: 767.98px) {
-            .player-wrapper video {
-                max-height: 60vh;
-                border-radius: var(--radius-md);
-            }
-            
-            .video-panel h1 {
-                font-size: 1.05rem;
-                word-break: break-all;
-            }
-            
-            .shortcuts {
-                display: none;
-            }
-        }
-        
-        /* 大屏手机竖屏播放器优化 (iPhone 13/14 Pro Max: 428px) */
-        @media (min-width: 414px) and (max-width: 475.98px) {
-            .player-container {
-                padding: 1rem;
-            }
-            
-            .player-wrapper video {
-                max-height: 55vh;
-            }
-            
-            .back-btn {
-                padding: 0.65rem 1.1rem;
-                font-size: 0.95rem;
-            }
-            
-            .video-panel {
-                padding: 1.25rem;
-            }
-            
-            .video-panel h1 {
-                font-size: 1.1rem;
-            }
-            
-            .video-details {
-                gap: 1rem;
-            }
-            
-            .detail-item {
-                font-size: 0.9rem;
-            }
-        }
-        
-        /* 大屏手机横屏播放器优化 */
-        @media (min-width: 844px) and (max-width: 955.98px) and (orientation: landscape) {
-            .player-container {
-                padding: 0.75rem;
-                padding-left: calc(0.75rem + env(safe-area-inset-left));
-                padding-right: calc(0.75rem + env(safe-area-inset-right));
-                max-width: 100%;
-            }
-            
-            .player-wrapper {
-                border-radius: var(--radius-md);
-            }
-            
-            .player-wrapper video {
-                max-height: 85vh;
-                width: 100%;
-            }
-            
-            .back-btn {
-                padding: 0.5rem 0.9rem;
-                font-size: 0.85rem;
-                margin-bottom: 0.75rem;
-            }
-            
-            .back-btn i {
-                font-size: 1rem;
-            }
-            
-            .video-panel {
-                padding: 0.85rem 1rem;
-                margin-top: 0.75rem;
-            }
-            
-            .video-panel h1 {
-                font-size: 0.95rem;
-                margin-bottom: 0.75rem;
-            }
-            
-            .video-details {
-                gap: 0.75rem;
-                flex-wrap: wrap;
-            }
-            
-            .detail-item {
-                font-size: 0.8rem;
-            }
-            
-            .detail-item i {
-                font-size: 1rem;
-            }
-            
-            .shortcuts {
-                display: none;
-            }
-            
-            /* 横屏时更紧凑的布局 */
-            .video-details {
-                display: grid;
-                grid-template-columns: repeat(2, 1fr);
-                gap: 0.5rem 1rem;
-            }
-        }
-        
-        /* 超大屏手机横屏 (iPhone 14/15 Pro Max: 932px+) */
-        @media (min-width: 956px) and (max-width: 1023.98px) and (orientation: landscape) {
-            .player-wrapper video {
-                max-height: 88vh;
-            }
-        }
-        
-        /* Video controls styling */
-        video::-webkit-media-controls-panel {
-            background: linear-gradient(transparent, rgba(0,0,0,0.85));
-        }
-        
-        /* Large screen optimization */
-        @media (min-width: 1200px) {
-            .player-container {
-                max-width: 1200px;
-            }
-            
-            .player-wrapper video {
-                max-height: 70vh;
-            }
-        }
-        
-        @media (min-width: 1600px) {
-            .player-container {
-                max-width: 1400px;
-            }
-            
-            .player-wrapper video {
-                max-height: 75vh;
-            }
-        }
-        
-        /* iOS 全屏播放器优化 */
-        video::-webkit-media-controls-start-playback-button {
-            opacity: 0;
-        }
-        
-        /* 确保视频在 iOS 上正确显示 */
-        video {
-            -webkit-transform: translateZ(0);
-        }
-        
-        /* 移动端自定义全屏按钮 */
-        .mobile-fullscreen-btn {
-            position: absolute;
-            bottom: 60px;
-            right: 15px;
-            width: 44px;
-            height: 44px;
-            background: rgba(0, 0, 0, 0.7);
-            border: 2px solid rgba(255, 255, 255, 0.8);
-            border-radius: 50%;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            z-index: 10;
-            transition: all 0.2s ease;
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-        }
-        
-        .mobile-fullscreen-btn i {
-            color: white;
-            font-size: 20px;
-        }
-        
-        .mobile-fullscreen-btn:hover,
-        .mobile-fullscreen-btn:active {
-            background: rgba(0, 0, 0, 0.85);
-            transform: scale(1.1);
-        }
-        
-        /* 移动端显示自定义按钮 */
-        @media (max-width: 767.98px) {
-            .mobile-fullscreen-btn {
-                display: flex;
-            }
-        }
-        
-        /* 大屏手机竖屏优化 */
-        @media (min-width: 414px) and (max-width: 475.98px) {
-            .mobile-fullscreen-btn {
-                width: 48px;
-                height: 48px;
-                bottom: 70px;
-                right: 18px;
-            }
-            
-            .mobile-fullscreen-btn i {
-                font-size: 22px;
-            }
-        }
-        
-        /* 全屏模式样式 */
-        .player-wrapper.fullscreen-active {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            z-index: 9999;
-            background: #000;
-            border-radius: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .player-wrapper.fullscreen-active video {
-            max-height: 100vh;
-            max-width: 100vw;
-            width: auto;
-            height: auto;
-        }
-        
-        /* 全屏时隐藏返回按钮和信息面板 */
-        .player-wrapper.fullscreen-active ~ .back-btn,
-        .player-wrapper.fullscreen-active ~ .video-panel,
-        .player-wrapper.fullscreen-active ~ *:not(#particles-js) {
-            display: none !important;
-        }
-        
-        /* 全屏时的自定义按钮位置调整 */
-        .player-wrapper.fullscreen-active .mobile-fullscreen-btn {
-            bottom: 20px;
-            right: 20px;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }
-        
-        .player-wrapper.fullscreen-active:hover .mobile-fullscreen-btn,
-        .player-wrapper.fullscreen-active.show-controls .mobile-fullscreen-btn {
-            opacity: 1;
-        }
-    </style>
-    
-    <!-- Particles.js -->
-    <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js" defer></script>
 </head>
-<body>
-    <!-- Particle Background -->
-    <div id="particles-js"></div>
-    
-    <main class="player-container py-3">
-        <!-- Back Button -->
-        <a href="/" class="back-btn">
+<body class="player-shell">
+    <div class="cyber-noise"></div>
+    <div class="cyber-orb cyber-orb-a"></div>
+
+    <header class="player-topbar">
+        <a href="/" class="player-back-link">
             <i class="bi bi-arrow-left"></i>
-            <span>返回列表</span>
+            <span>Library</span>
         </a>
-        
-        <!-- Video Player -->
-        <div class="player-wrapper" id="playerWrapper">
-            <video id="videoPlayer" 
-                   data-video-id="{{ video.id }}"
-                   controls 
-                   autoplay 
-                   playsinline
-                   webkit-playsinline
-                   x5-video-player-type="h5"
-                   x5-video-player-fullscreen="true"
-                   preload="metadata"
-                   poster="/static/poster.png">
-                <source src="/stream/{{ video.id }}" type="video/{{ video.ext|lower }}">
-                您的浏览器不支持视频播放，请使用现代浏览器。
-            </video>
-            
-            <!-- 移动端自定义全屏按钮 -->
-            <button class="mobile-fullscreen-btn" id="mobileFullscreenBtn" aria-label="全屏">
-                <i class="bi bi-arrows-fullscreen"></i>
-            </button>
+        <div class="player-topbar-meta">
+            <span>{{ current_user }}</span>
+            <strong>Now Playing</strong>
         </div>
-        
-        <!-- Video Info Panel -->
-        <div class="video-panel">
-            <h1>{{ video.name }}</h1>
-            <div class="video-details">
-                <div class="detail-item">
-                    <i class="bi bi-file-earmark-play"></i>
-                    <span>格式: <span class="value">{{ video.ext }}</span></span>
-                </div>
-                <div class="detail-item">
-                    <i class="bi bi-hdd"></i>
-                    <span>大小: <span class="value">{{ video.size_mb }} MB</span></span>
-                </div>
-                <div class="detail-item">
-                    <i class="bi bi-calendar3"></i>
-                    <span>修改: <span class="value">{{ video.modified }}</span></span>
-                </div>
-                <div class="detail-item">
-                    <i class="bi bi-folder2-open"></i>
-                    <span>路径: <span class="value" style="word-break: break-all;">{{ video.rel_path }}</span></span>
+    </header>
+
+    <main class="player-layout">
+        <section class="player-stage">
+            <div class="player-stage-copy">
+                <p class="player-kicker">{{ video.ext }} · {{ video.size_mb }} MB</p>
+                <h1>{{ video.name }}</h1>
+                <p>{{ video.parent_dir or video.rel_path }}</p>
+            </div>
+
+            <div class="player-stage-media">
+                <div class="player-wrapper" id="playerWrapper">
+                    <video id="videoPlayer"
+                           data-video-id="{{ video.id }}"
+                           controls
+                           autoplay
+                           playsinline
+                           webkit-playsinline
+                           x5-video-player-type="h5"
+                           x5-video-player-fullscreen="true"
+                           preload="metadata"
+                           poster="/static/poster.png">
+                        <source src="/stream/{{ video.id }}" type="video/{{ video.ext|lower }}">
+                        您的浏览器不支持视频播放，请使用现代浏览器。
+                    </video>
+                    <button class="mobile-fullscreen-btn" id="mobileFullscreenBtn" aria-label="全屏">
+                        <i class="bi bi-arrows-fullscreen"></i>
+                    </button>
                 </div>
             </div>
-            
-            <!-- Keyboard Shortcuts -->
-            <div class="shortcuts">
-                <h5><i class="bi bi-keyboard me-2"></i>键盘快捷键</h5>
-                <div class="shortcuts-list">
-                    <div class="shortcut">
-                        <kbd>Space</kbd>
-                        <span>暂停/播放</span>
+        </section>
+
+        <aside class="player-sidebar">
+            <section class="player-panel">
+                <div class="player-panel-head">
+                    <h2>Playback Details</h2>
+                    <span>{{ video.modified }}</span>
+                </div>
+                <div class="player-detail-grid">
+                    <div class="detail-item">
+                        <i class="bi bi-file-earmark-play"></i>
+                        <span>格式</span>
+                        <strong>{{ video.ext }}</strong>
                     </div>
-                    <div class="shortcut">
-                        <kbd>←</kbd><kbd>→</kbd>
-                        <span>快退/快进 5秒</span>
+                    <div class="detail-item">
+                        <i class="bi bi-hdd-stack"></i>
+                        <span>大小</span>
+                        <strong>{{ video.size_mb }} MB</strong>
                     </div>
-                    <div class="shortcut">
-                        <kbd>↑</kbd><kbd>↓</kbd>
-                        <span>音量调节</span>
+                    <div class="detail-item">
+                        <i class="bi bi-clock-history"></i>
+                        <span>时长</span>
+                        <strong>{{ video.duration_formatted or "--:--" }}</strong>
                     </div>
-                    <div class="shortcut">
-                        <kbd>F</kbd>
-                        <span>全屏</span>
-                    </div>
-                    <div class="shortcut">
-                        <kbd>M</kbd>
-                        <span>静音</span>
-                    </div>
-                    <div class="shortcut">
-                        <kbd>Esc</kbd>
-                        <span>退出全屏</span>
+                    <div class="detail-item">
+                        <i class="bi bi-folder2-open"></i>
+                        <span>路径</span>
+                        <strong>{{ video.rel_path }}</strong>
                     </div>
                 </div>
-            </div>
-        </div>
+            </section>
+
+            <section class="player-panel next-up-panel">
+                <div class="player-panel-head">
+                    <h2>Next Up</h2>
+                    <span>{{ next_up_videos|length }} 项</span>
+                </div>
+                <div class="next-up-list">
+                    {% for item in next_up_videos %}
+                    <a class="next-up-card" href="/play/{{ item.id }}">
+                        <div class="next-up-thumb">
+                            <img src="/api/video/thumbnail/{{ item.id }}" alt="{{ item.name }}" onerror="this.style.display='none'">
+                            <div class="next-up-fallback"><i class="bi bi-film"></i></div>
+                        </div>
+                        <div class="next-up-copy">
+                            <strong>{{ item.name }}</strong>
+                            <span>{{ item.ext }} · {{ item.size_mb }} MB</span>
+                        </div>
+                    </a>
+                    {% else %}
+                    <div class="next-up-empty">当前目录没有更多视频了。</div>
+                    {% endfor %}
+                </div>
+            </section>
+
+            <section class="player-panel shortcuts-panel">
+                <div class="player-panel-head">
+                    <h2>Shortcuts</h2>
+                    <span>Keyboard</span>
+                </div>
+                <div class="shortcut-grid">
+                    <span><kbd>Space</kbd> 播放/暂停</span>
+                    <span><kbd>←</kbd><kbd>→</kbd> 快退/快进</span>
+                    <span><kbd>↑</kbd><kbd>↓</kbd> 音量调节</span>
+                    <span><kbd>F</kbd> 全屏</span>
+                </div>
+            </section>
+        </aside>
     </main>
-    
-    <!-- Bootstrap 5 JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- Custom JS -->
+
     <script src="/static/app.js"></script>
-    <!-- Particles Configuration -->
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        if (typeof particlesJS !== 'undefined') {
-            particlesJS('particles-js', {
-                particles: {
-                    number: {
-                        value: window.innerWidth < 768 ? 25 : 45,
-                        density: {
-                            enable: true,
-                            value_area: 1200
-                        }
-                    },
-                    color: {
-                        value: ['#667eea', '#764ba2', '#a78bfa', '#818cf8']
-                    },
-                    shape: {
-                        type: 'circle'
-                    },
-                    opacity: {
-                        value: 0.2,
-                        random: true,
-                        anim: {
-                            enable: true,
-                            speed: 0.3,
-                            opacity_min: 0.06,
-                            sync: false
-                        }
-                    },
-                    size: {
-                        value: 2.5,
-                        random: true,
-                        anim: {
-                            enable: true,
-                            speed: 2,
-                            size_min: 0.5,
-                            sync: false
-                        }
-                    },
-                    line_linked: {
-                        enable: true,
-                        distance: 150,
-                        color: '#667eea',
-                        opacity: 0.1,
-                        width: 1
-                    },
-                    move: {
-                        enable: true,
-                        speed: 0.5,
-                        direction: 'none',
-                        random: true,
-                        straight: false,
-                        out_mode: 'out',
-                        bounce: false
-                    }
-                },
-                interactivity: {
-                    detect_on: 'canvas',
-                    events: {
-                        onhover: {
-                            enable: window.innerWidth > 768,
-                            mode: 'grab'
-                        },
-                        onclick: {
-                            enable: true,
-                            mode: 'push'
-                        },
-                        resize: true
-                    },
-                    modes: {
-                        grab: {
-                            distance: 140,
-                            line_linked: {
-                                opacity: 0.3
-                            }
-                        },
-                        push: {
-                            particles_nb: 3
-                        }
-                    }
-                },
-                retina_detect: true
-            });
-        }
-    });
-    </script>
 </body>
 </html>

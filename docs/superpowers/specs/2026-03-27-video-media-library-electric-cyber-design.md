@@ -47,10 +47,13 @@ The homepage follows a cinematic media-library composition:
 
 - Floating top navigation with brand, search, directory selection, refresh, and logout
 - High-impact hero/recommended module using neon-glass layering and asymmetrical composition
+- Directory browsing surfaces inspired by the bundled file-explorer references
 - Video library grid with visually rich cards
 - Secondary metadata surfaces for directory context, library counts, or recent content
 
 The page should communicate "browse and watch" immediately. It should not resemble a generic CRUD dashboard or file listing.
+
+For phone browsers, the homepage should adapt as a mobile web experience, not as a separate app shell. The responsive layout should borrow spacing, hierarchy, and touch-target cues from the bundled `stitch/stitch/mobile_home/code.html` reference while remaining the same route and the same overall product.
 
 ### Playback Page
 
@@ -64,6 +67,8 @@ The playback page follows a cinematic split layout:
 
 The player should make the video the protagonist while keeping supporting information close at hand.
 
+For phone browsers, the player should adapt as a mobile web layout derived from `stitch/stitch/mobile_player/code.html`, emphasizing the video stage, compact metadata, and touch-friendly controls without introducing a separate mobile-only route.
+
 ## Visual System
 
 ### Source of Truth
@@ -73,6 +78,10 @@ The visual direction is derived from:
 - `stitch/stitch/electric_cyber/DESIGN.md`
 - `stitch/stitch/media_library_home_electric_cyber/code.html`
 - `stitch/stitch/immersive_video_player_electric_cyber/code.html`
+- `stitch/stitch/mobile_home/code.html`
+- `stitch/stitch/mobile_player/code.html`
+- `stitch/stitch/local_file_explorer/code.html`
+- `stitch/stitch/mobile_file_explorer/code.html`
 
 ### Design Principles
 
@@ -132,6 +141,7 @@ The visual direction is derived from:
   - list of videos for the current view
   - current user/auth state
   - lightweight hero/recommended candidates derived from current video data
+  - lightweight directory-browser context for folder navigation affordances
 
 #### Playback
 
@@ -199,6 +209,7 @@ This avoids broad backend churn while re-establishing a clear product identity. 
 - Preserve keyboard usability for the player
 - Avoid hover-only critical actions on mobile
 - Keep layout functional from phone widths through large desktop displays
+- Treat mobile browsers as a first-class target by adapting the bundled mobile web references instead of relying on desktop compression alone
 
 ## Risks
 

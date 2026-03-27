@@ -54,26 +54,29 @@ const requestQueue = new RequestQueue();
 document.addEventListener('DOMContentLoaded', function() {
     // 初始化所有功能（分批加载，减少并发）
     initConfig().then(() => {
-        initSearch();
-        initVideoCards();
-        initThumbnails();
         initPlayer();
-        initDeleteButtons();
-        
-        // 延迟加载非关键功能
-        setTimeout(() => {
-            initVideoPreview();
-        }, 500);
-        
-        // 进一步延迟加载状态检查
-        setTimeout(() => {
-            initAutoIntegrityCheck();
-        }, 1000);
-        
-        // 最后加载时长信息
-        setTimeout(() => {
-            initVideoDurations();
-        }, 1500);
+
+        if (document.querySelector('.media-library-shell')) {
+            initSearch();
+            initVideoCards();
+            initThumbnails();
+            initDeleteButtons();
+
+            // 延迟加载非关键功能
+            setTimeout(() => {
+                initVideoPreview();
+            }, 500);
+
+            // 进一步延迟加载状态检查
+            setTimeout(() => {
+                initAutoIntegrityCheck();
+            }, 1000);
+
+            // 最后加载时长信息
+            setTimeout(() => {
+                initVideoDurations();
+            }, 1500);
+        }
     });
 });
 
@@ -95,7 +98,7 @@ async function initConfig() {
  * 搜索框交互
  */
 function initSearch() {
-    const searchInput = document.querySelector('.search-box input');
+    const searchInput = document.querySelector('.search-box input, .library-search input');
     if (searchInput) {
         searchInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {

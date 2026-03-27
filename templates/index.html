@@ -2,471 +2,238 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta name="theme-color" content="#0f0f1a">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#020f1e">
     <title>本地视频库</title>
-    
-    <!-- Preconnect for faster loading -->
     <link rel="preconnect" href="https://cdn.jsdelivr.net">
-    
-    <!-- Bootstrap 5 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css" rel="stylesheet">
-    <!-- Custom styles -->
     <link href="/static/style.css" rel="stylesheet">
-    
-    <!-- Particles.js -->
-    <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js" defer></script>
 </head>
-<body>
-    <!-- Particle Background -->
-    <div id="particles-js"></div>
-    
-    <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg">
-        <div class="container">
-            <a class="navbar-brand" href="/">
-                <i class="bi bi-play-circle-fill"></i>
-                <span>本地视频库</span>
-            </a>
-            
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <i class="bi bi-list text-white"></i>
-            </button>
-            
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <form class="d-flex ms-auto my-2 my-lg-0" method="GET" action="/">
-                    <div class="search-box">
-                        <i class="bi bi-search search-icon"></i>
-                        <input type="text" 
-                               class="form-control" 
-                               name="search" 
-                               value="{{ search }}" 
-                               placeholder="搜索视频..."
-                               autocomplete="off">
-                        {% if current_browse %}
-                        <input type="hidden" name="browse" value="{{ current_browse }}">
-                        {% endif %}
-                        {% if current_path %}
-                        <input type="hidden" name="dir_path" value="{{ current_path }}">
-                        {% endif %}
-                    </div>
-                </form>
-                <a href="/logout" class="btn btn-outline-light btn-sm ms-3" title="退出登录">
-                    <i class="bi bi-box-arrow-right"></i>
-                </a>
-            </div>
-        </div>
-    </nav>
-    
-    <main class="container py-4">
-        <!-- Directory Selector (Home Page) -->
-        {% if directories and not browse_result and not search %}
-        <div class="directory-section">
-            <h5 class="section-title">
-                <i class="bi bi-folder2-open"></i>
-                <span>选择视频目录</span>
-            </h5>
-            <div class="directory-grid">
-                {% for dir in directories %}
-                <a href="/?browse={{ dir.path | urlencode }}" class="directory-card">
-                    <div class="dir-icon">
-                        <i class="bi bi-folder-fill"></i>
-                    </div>
-                    <div class="dir-info">
-                        <div class="dir-name">{{ dir.name }}</div>
-                        <div class="dir-count">{{ dir.video_count }} 个视频</div>
-                    </div>
-                    <i class="bi bi-chevron-right dir-arrow"></i>
-                </a>
-                {% endfor %}
-            </div>
-        </div>
-        
-        <hr class="section-divider">
-        
-        <h5 class="section-title">
-            <i class="bi bi-clock-history"></i>
-            <span>最近视频</span>
-        </h5>
-        {% endif %}
-        
-        <!-- Breadcrumb Navigation -->
-        {% if browse_result %}
-        <div class="breadcrumb-nav">
-            <a href="/" class="breadcrumb-item">
-                <i class="bi bi-house-door"></i>
-                <span>首页</span>
-            </a>
-            <i class="bi bi-chevron-right breadcrumb-sep"></i>
-            {% set base_name = directories | selectattr('path', 'eq', current_browse) | map(attribute='name') | first %}
-            <a href="/?browse={{ current_browse | urlencode }}" class="breadcrumb-item">
-                {{ base_name or '目录' }}
-            </a>
-            {% if current_path %}
-            {% set path_parts = current_path.split('/') %}
-            {% set accumulated = '' %}
-            {% for part in path_parts %}
-            <i class="bi bi-chevron-right breadcrumb-sep"></i>
-            {% set accumulated = accumulated + '/' + part if accumulated else part %}
-            <a href="/?browse={{ current_browse | urlencode }}&dir_path={{ accumulated | urlencode }}" class="breadcrumb-item">
-                {{ part }}
-            </a>
-            {% endfor %}
-            {% endif %}
-        </div>
-        
-        <!-- Back Button -->
-        {% if browse_result.parent_path != None %}
-        <a href="/?browse={{ current_browse | urlencode }}{% if browse_result.parent_path %}&dir_path={{ browse_result.parent_path | urlencode }}{% endif %}" 
-           class="back-folder-btn">
-            <i class="bi bi-arrow-left-circle"></i>
-            <span>返回上级</span>
+<body class="media-library-shell">
+    <div class="cyber-noise"></div>
+    <div class="cyber-orb cyber-orb-a"></div>
+    <div class="cyber-orb cyber-orb-b"></div>
+
+    <header class="library-topbar">
+        <a class="library-brand" href="/">
+            <span class="library-brand-badge"><i class="bi bi-play-circle-fill"></i></span>
+            <span>
+                <strong>CyberStream</strong>
+                <small>本地视频库</small>
+            </span>
         </a>
-        {% endif %}
-        
-        <!-- Folder List -->
-        {% if browse_result.folders %}
-        <div class="folder-section">
-            <div class="folder-grid">
-                {% for folder in browse_result.folders %}
-                <a href="/?browse={{ current_browse | urlencode }}&dir_path={{ folder.path | urlencode }}" class="folder-card">
-                    <i class="bi bi-folder-fill folder-icon"></i>
-                    <span class="folder-name">{{ folder.name }}</span>
-                    <i class="bi bi-chevron-right folder-arrow"></i>
-                </a>
-                {% endfor %}
-            </div>
-        </div>
-        {% endif %}
-        {% endif %}
-        
-        <!-- Stats Bar -->
-        {% if videos %}
-        <div class="stats-bar">
-            <div class="stat-item">
-                <i class="bi bi-collection-play"></i>
-                <span>共 <strong>{{ total }}</strong> 个视频</span>
-            </div>
-            <div class="stat-item">
-                <i class="bi bi-folder2-open"></i>
-                <span>第 <strong>{{ page }}</strong> / {{ total_pages if total_pages > 0 else 1 }} 页</span>
-            </div>
-            <div class="stat-item" id="integrityStatus" style="display: none;">
-                <i class="bi bi-shield-check text-success"></i>
-                <span>已检查 <strong id="checkedCount">0</strong> 个视频</span>
-            </div>
-        </div>
-        {% endif %}
-        
-        <!-- Video Grid -->
-        {% if videos %}
-        <div class="video-grid" data-preview-enabled="true">
-            {% for video in videos %}
-            <div class="video-card-wrapper" data-video-id="{{ video.id }}" data-video-name="{{ video.name }}">
-                <a href="/play/{{ video.id }}" class="video-card">
-                    <div class="video-thumb">
-                        <img class="video-thumbnail" 
-                             data-src="/api/video/thumbnail/{{ video.id }}" 
-                             src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect fill='%231a1a2e' width='16' height='9'/%3E%3C/svg%3E"
-                             alt="{{ video.name }}"
-                             loading="lazy">
-                        <div class="thumb-placeholder">
-                            <i class="bi bi-play-circle"></i>
-                        </div>
-                        <div class="play-overlay">
-                            <div class="play-btn">
-                                <i class="bi bi-play-fill"></i>
-                            </div>
-                        </div>
-                        <div class="video-preview" data-src="/stream/{{ video.id }}">
-                            <video muted preload="metadata"></video>
-                        </div>
-                        <!-- 损坏警告图标 -->
-                        <div class="corrupted-warning" style="display: none;" title="视频文件可能已损坏">
-                            <i class="bi bi-exclamation-triangle-fill"></i>
-                        </div>
-                    </div>
-                    <div class="video-info">
-                        <div class="video-title" title="{{ video.name }}">{{ video.name }}</div>
-                        {% if video.parent_dir %}
-                        <div class="video-folder" title="{{ video.parent_dir }}">
-                            <i class="bi bi-folder2"></i> {{ video.parent_dir }}
-                        </div>
-                        {% endif %}
-                        <div class="video-meta">
-                            <span class="ext-badge">{{ video.ext }}</span>
-                            <span class="video-duration" data-video-id="{{ video.id }}">
-                                <i class="bi bi-clock"></i> <span class="duration-text">--:--</span>
-                            </span>
-                            <span><i class="bi bi-hdd"></i> {{ video.size_mb }} MB</span>
-                        </div>
-                    </div>
-                </a>
-                <!-- 删除按钮 -->
-                <button class="video-delete-btn" title="删除视频" data-video-id="{{ video.id }}" data-video-name="{{ video.name }}">
-                    <i class="bi bi-trash3"></i>
-                </button>
-            </div>
-            {% endfor %}
-        </div>
-        
-        <!-- Browse Result Videos -->
-        {% elif browse_result and browse_result.videos %}
-        <div class="video-grid" data-preview-enabled="true">
-            {% for video in browse_result.videos %}
-            <div class="video-card-wrapper" data-video-id="{{ video.id }}" data-video-name="{{ video.name }}">
-                <a href="/play/{{ video.id }}" class="video-card">
-                    <div class="video-thumb">
-                        <img class="video-thumbnail" 
-                             data-src="/api/video/thumbnail/{{ video.id }}" 
-                             src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect fill='%231a1a2e' width='16' height='9'/%3E%3C/svg%3E"
-                             alt="{{ video.name }}"
-                             loading="lazy">
-                        <div class="thumb-placeholder">
-                            <i class="bi bi-play-circle"></i>
-                        </div>
-                        <div class="play-overlay">
-                            <div class="play-btn">
-                                <i class="bi bi-play-fill"></i>
-                            </div>
-                        </div>
-                        <div class="video-preview" data-src="/stream/{{ video.id }}">
-                            <video muted preload="metadata"></video>
-                        </div>
-                        <!-- 损坏警告图标 -->
-                        <div class="corrupted-warning" style="display: none;" title="视频文件可能已损坏">
-                            <i class="bi bi-exclamation-triangle-fill"></i>
-                        </div>
-                    </div>
-                    <div class="video-info">
-                        <div class="video-title" title="{{ video.name }}">{{ video.name }}</div>
-                        {% if video.rel_path %}
-                        <div class="video-folder" title="{{ video.rel_path }}">
-                            <i class="bi bi-folder2"></i> {{ video.rel_path | dirname }}
-                        </div>
-                        {% endif %}
-                        <div class="video-meta">
-                            <span class="ext-badge">{{ video.ext }}</span>
-                            <span class="video-duration" data-video-id="{{ video.id }}">
-                                <i class="bi bi-clock"></i> <span class="duration-text">--:--</span>
-                            </span>
-                            <span><i class="bi bi-hdd"></i> {{ video.size_mb }} MB</span>
-                        </div>
-                    </div>
-                </a>
-                <!-- 删除按钮 -->
-                <button class="video-delete-btn" title="删除视频" data-video-id="{{ video.id }}" data-video-name="{{ video.name }}">
-                    <i class="bi bi-trash3"></i>
-                </button>
-            </div>
-            {% endfor %}
-        </div>
-        
-        <!-- Empty Directory -->
-        {% elif browse_result and not browse_result.videos and not browse_result.folders %}
-        <div class="empty-state">
-            <i class="bi bi-folder-x"></i>
-            <h3>此目录为空</h3>
-            <p>该目录中没有视频文件</p>
-        </div>
-        
-        <!-- No Directories Configured -->
-        {% elif not search and not browse_result and not directories %}
-        <div class="empty-state">
-            <i class="bi bi-gear"></i>
-            <h3>未配置视频目录</h3>
-            <p>请检查 config.ini 中的配置</p>
-        </div>
-        
-        <!-- No Search Results -->
-        {% elif search and not videos %}
-        <div class="empty-state">
+
+        <form class="library-search" method="GET" action="/">
             <i class="bi bi-search"></i>
-            <h3>没有找到匹配的视频</h3>
-            <p>尝试其他搜索关键词</p>
+            <input type="text" name="search" value="{{ search }}" placeholder="搜索视频、剧集、目录...">
+            {% if current_browse %}
+            <input type="hidden" name="browse" value="{{ current_browse }}">
+            {% endif %}
+            {% if current_path %}
+            <input type="hidden" name="dir_path" value="{{ current_path }}">
+            {% endif %}
+        </form>
+
+        <div class="library-actions">
+            <span class="library-user">{{ current_user }}</span>
+            <a href="/logout" class="library-icon-btn" aria-label="退出登录">
+                <i class="bi bi-box-arrow-right"></i>
+            </a>
         </div>
-        
-        {% endif %}
-        
-        <!-- Pagination -->
-        {% if total_pages and total_pages > 1 %}
-        <nav class="pagination-wrapper">
-            <ul class="pagination">
-                {% if page > 1 %}
-                <li class="page-item">
-                    <a class="page-link" href="/?page={{ page - 1 }}{% if search %}&search={{ search }}{% endif %}">
-                        <i class="bi bi-chevron-left"></i>
-                    </a>
-                </li>
-                {% else %}
-                <li class="page-item disabled">
-                    <span class="page-link"><i class="bi bi-chevron-left"></i></span>
-                </li>
-                {% endif %}
-                
-                {% for p in range(1, total_pages + 1) %}
-                    {% if p == page %}
-                    <li class="page-item active">
-                        <span class="page-link">{{ p }}</span>
-                    </li>
-                    {% elif p == 1 or p == total_pages or (p >= page - 2 and p <= page + 2) %}
-                    <li class="page-item">
-                        <a class="page-link" href="/?page={{ p }}{% if search %}&search={{ search }}{% endif %}">{{ p }}</a>
-                    </li>
-                    {% elif p == page - 3 or p == page + 3 %}
-                    <li class="page-item disabled">
-                        <span class="page-link">...</span>
-                    </li>
+    </header>
+
+    <main class="library-canvas">
+        <section class="hero-spotlight {% if not featured_video %}is-empty{% endif %}">
+            {% if featured_video %}
+            <div class="hero-copy">
+                <p class="hero-kicker">{% if directory_browse_mode %}Folder View{% else %}Continue Watching{% endif %}</p>
+                <h1>{{ featured_video.name }}</h1>
+                <p class="hero-description">
+                    {% if featured_video.parent_dir %}
+                    {{ featured_video.parent_dir }} ·
                     {% endif %}
-                {% endfor %}
-                
-                {% if page < total_pages %}
-                <li class="page-item">
-                    <a class="page-link" href="/?page={{ page + 1 }}{% if search %}&search={{ search }}{% endif %}">
-                        <i class="bi bi-chevron-right"></i>
+                    {{ featured_video.ext }} · {{ featured_video.size_mb }} MB · 最近更新于 {{ featured_video.modified }}
+                </p>
+                <div class="hero-actions">
+                    <a class="hero-primary-btn" href="/play/{{ featured_video.id }}">
+                        <i class="bi bi-play-fill"></i>
+                        继续播放
                     </a>
-                </li>
-                {% else %}
-                <li class="page-item disabled">
-                    <span class="page-link"><i class="bi bi-chevron-right"></i></span>
-                </li>
+                    <a class="hero-secondary-btn" href="{% if current_browse %}/?browse={{ current_browse | urlencode }}{% else %}/{% endif %}">
+                        <i class="bi bi-folder2-open"></i>
+                        浏览目录
+                    </a>
+                </div>
+                <div class="hero-progress-meta">
+                    <span>{% if continue_video %}{{ continue_video.modified }}{% else %}准备播放{% endif %}</span>
+                    <span>{{ total }} 个视频</span>
+                </div>
+            </div>
+            <div class="hero-visual">
+                <div class="hero-poster-frame">
+                    <img src="{{ featured_video.poster_url }}" alt="{{ featured_video.name }}" onerror="this.style.display='none'">
+                    <div class="hero-poster-fallback">
+                        <i class="bi bi-camera-reels"></i>
+                    </div>
+                    <div class="hero-poster-overlay"></div>
+                </div>
+            </div>
+            {% else %}
+            <div class="hero-empty">
+                <p class="hero-kicker">Library Offline</p>
+                <h1>当前目录里还没有可展示的视频</h1>
+                <p class="hero-description">检查配置目录、搜索条件，或者回到首页重新选择视频库。</p>
+            </div>
+            {% endif %}
+        </section>
+
+        <section class="library-toolbar">
+            <div>
+                <p class="toolbar-label">{% if directory_browse_mode %}Directory Browser{% else %}Media Library{% endif %}</p>
+                <h2>{% if directory_browse_mode %}按文件夹浏览{% else %}Recently Added{% endif %}</h2>
+            </div>
+            <div class="toolbar-stats">
+                <span><i class="bi bi-collection-play"></i>{{ total }} 个视频</span>
+                <span><i class="bi bi-grid-3x3-gap"></i>第 {{ page }} / {{ total_pages if total_pages > 0 else 1 }} 页</span>
+            </div>
+        </section>
+
+        <section class="directory-browser">
+            <div class="directory-breadcrumbs">
+                <a href="/"><i class="bi bi-house-door"></i>首页</a>
+                {% if current_browse %}
+                <span><i class="bi bi-chevron-right"></i></span>
+                {% set base_name = directories | selectattr('path', 'eq', current_browse) | map(attribute='name') | first %}
+                <a href="/?browse={{ current_browse | urlencode }}">{{ base_name or '目录' }}</a>
                 {% endif %}
-            </ul>
-        </nav>
-        {% endif %}
+                {% if current_path %}
+                {% for part in current_path.split('/') %}
+                <span><i class="bi bi-chevron-right"></i></span>
+                <span>{{ part }}</span>
+                {% endfor %}
+                {% endif %}
+            </div>
+
+            <div class="directory-pills">
+                {% for dir in directories %}
+                <a class="directory-pill {% if current_browse == dir.path %}active{% endif %}" href="/?browse={{ dir.path | urlencode }}">
+                    <i class="bi bi-folder2-open"></i>
+                    <span>{{ dir.name }}</span>
+                    <strong>{{ dir.video_count }}</strong>
+                </a>
+                {% endfor %}
+            </div>
+
+            {% if browse_result and browse_result.folders %}
+            <div class="folder-browser-list">
+                {% for folder in browse_result.folders %}
+                <a class="folder-browser-row" href="/?browse={{ current_browse | urlencode }}&dir_path={{ folder.path | urlencode }}">
+                    <span class="folder-browser-icon"><i class="bi bi-folder-fill"></i></span>
+                    <span class="folder-browser-name">{{ folder.name }}</span>
+                    <span class="folder-browser-arrow"><i class="bi bi-chevron-right"></i></span>
+                </a>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </section>
+
+        <section class="library-grid-section">
+            <div class="library-section-head">
+                <h3>Recently Added</h3>
+                <span>{% if search %}搜索结果{% else %}最新入库{% endif %}</span>
+            </div>
+
+            {% if videos %}
+            <div class="video-grid cyber-video-grid" data-preview-enabled="true">
+                {% for video in videos %}
+                <div class="video-card-wrapper" data-video-id="{{ video.id }}" data-video-name="{{ video.name }}">
+                    <a href="/play/{{ video.id }}" class="video-card">
+                        <div class="video-thumb cyber-video-thumb">
+                            <img class="video-thumbnail"
+                                 data-src="/api/video/thumbnail/{{ video.id }}"
+                                 src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect fill='%23020f1e' width='16' height='9'/%3E%3C/svg%3E"
+                                 alt="{{ video.name }}"
+                                 loading="lazy">
+                            <div class="thumb-placeholder cyber-thumb-placeholder">
+                                <i class="bi bi-camera-reels"></i>
+                            </div>
+                            <div class="play-overlay cyber-play-overlay">
+                                <div class="play-btn"><i class="bi bi-play-fill"></i></div>
+                            </div>
+                            <div class="video-preview" data-src="/stream/{{ video.id }}">
+                                <video muted preload="metadata"></video>
+                            </div>
+                            <div class="video-card-topline">
+                                <span class="video-status-chip">{{ video.ext }}</span>
+                                <span class="video-status-chip muted">{{ video.size_mb }} MB</span>
+                            </div>
+                            <div class="corrupted-warning" style="display: none;" title="视频文件可能已损坏">
+                                <i class="bi bi-exclamation-triangle-fill"></i>
+                            </div>
+                        </div>
+                        <div class="video-info cyber-video-info">
+                            <div class="video-title" title="{{ video.name }}">{{ video.name }}</div>
+                            <div class="video-folder" title="{{ video.parent_dir or video.rel_path }}">
+                                <i class="bi bi-folder2"></i>
+                                {{ video.parent_dir or video.rel_path }}
+                            </div>
+                            <div class="video-meta">
+                                <span class="video-duration" data-video-id="{{ video.id }}">
+                                    <i class="bi bi-clock-history"></i>
+                                    <span class="duration-text">--:--</span>
+                                </span>
+                                <span><i class="bi bi-calendar3"></i>{{ video.modified }}</span>
+                            </div>
+                        </div>
+                    </a>
+                    <button class="video-delete-btn" title="删除视频" data-video-id="{{ video.id }}" data-video-name="{{ video.name }}">
+                        <i class="bi bi-trash3"></i>
+                    </button>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="library-empty-state">
+                <i class="bi bi-film"></i>
+                <h4>没有找到匹配的视频</h4>
+                <p>你可以切换目录、调整搜索词，或者检查当前视频目录配置。</p>
+            </div>
+            {% endif %}
+
+            {% if pagination %}
+            <nav class="library-pagination" aria-label="分页导航">
+                <div class="pagination-summary">{{ pagination.summary }}</div>
+                <div class="pagination-actions">
+                    {% if pagination.prev_url %}
+                    <a class="pagination-link pagination-link-nav" href="{{ pagination.prev_url }}">
+                        <i class="bi bi-arrow-left"></i>
+                        上一页
+                    </a>
+                    {% endif %}
+
+                    <div class="pagination-pages">
+                        {% for item in pagination.page_links %}
+                        <a class="pagination-link {% if item.active %}active{% endif %}" href="{{ item.url }}">
+                            {{ item.number }}
+                        </a>
+                        {% endfor %}
+                    </div>
+
+                    {% if pagination.next_url %}
+                    <a class="pagination-link pagination-link-nav" href="{{ pagination.next_url }}">
+                        下一页
+                        <i class="bi bi-arrow-right"></i>
+                    </a>
+                    {% endif %}
+                </div>
+            </nav>
+            {% endif %}
+        </section>
     </main>
-    
-    <!-- Footer -->
-    <footer>
-        <small>局域网视频服务器 · 支持多种视频格式 · 悬停预览 · 自动检测损坏视频</small>
-    </footer>
-    
-    <!-- 下载中视频提示弹窗 -->
-    <div id="downloadingAlertModal" class="delete-modal">
-        <div class="delete-modal-content">
-            <div class="delete-modal-icon" style="background: rgba(59, 130, 246, 0.15);">
-                <i class="bi bi-download" style="color: #3b82f6;"></i>
-            </div>
-            <h3>视频正在下载</h3>
-            <p>视频文件正在下载中，请稍后再试</p>
-            <p class="downloading-video-name" style="color: var(--text-secondary); font-weight: 600;"></p>
-            <div class="delete-modal-actions">
-                <button class="btn btn-primary" onclick="this.closest('.delete-modal').classList.remove('show')">知道了</button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- 损坏视频提示弹窗 -->
-    <div id="corruptedAlertModal" class="delete-modal">
-        <div class="delete-modal-content">
-            <div class="delete-modal-icon" style="background: rgba(220, 38, 38, 0.15);">
-                <i class="bi bi-exclamation-triangle-fill" style="color: #dc2626;"></i>
-            </div>
-            <h3>视频已损坏</h3>
-            <p>视频文件已损坏，无法播放</p>
-            <p class="corrupted-video-name" style="color: var(--text-secondary); font-weight: 600;"></p>
-            <div class="delete-modal-actions">
-                <button class="btn btn-secondary" onclick="this.closest('.delete-modal').classList.remove('show')">关闭</button>
-                <button class="btn btn-outline-danger" onclick="document.querySelector('.video-card-wrapper.corrupted .video-delete-btn')?.click(); this.closest('.delete-modal').classList.remove('show')">
-                    <i class="bi bi-trash3 me-1"></i>删除此视频
-                </button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Bootstrap 5 JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- Custom JS -->
+
     <script src="/static/app.js"></script>
-    <!-- Particles Configuration -->
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        if (typeof particlesJS !== 'undefined') {
-            particlesJS('particles-js', {
-                particles: {
-                    number: {
-                        value: window.innerWidth < 768 ? 30 : 60,
-                        density: {
-                            enable: true,
-                            value_area: 1200
-                        }
-                    },
-                    color: {
-                        value: ['#667eea', '#764ba2', '#a78bfa', '#818cf8']
-                    },
-                    shape: {
-                        type: 'circle'
-                    },
-                    opacity: {
-                        value: 0.25,
-                        random: true,
-                        anim: {
-                            enable: true,
-                            speed: 0.4,
-                            opacity_min: 0.08,
-                            sync: false
-                        }
-                    },
-                    size: {
-                        value: 3,
-                        random: true,
-                        anim: {
-                            enable: true,
-                            speed: 2,
-                            size_min: 0.5,
-                            sync: false
-                        }
-                    },
-                    line_linked: {
-                        enable: true,
-                        distance: 150,
-                        color: '#667eea',
-                        opacity: 0.12,
-                        width: 1
-                    },
-                    move: {
-                        enable: true,
-                        speed: 0.6,
-                        direction: 'none',
-                        random: true,
-                        straight: false,
-                        out_mode: 'out',
-                        bounce: false
-                    }
-                },
-                interactivity: {
-                    detect_on: 'canvas',
-                    events: {
-                        onhover: {
-                            enable: window.innerWidth > 768,
-                            mode: 'grab'
-                        },
-                        onclick: {
-                            enable: true,
-                            mode: 'push'
-                        },
-                        resize: true
-                    },
-                    modes: {
-                        grab: {
-                            distance: 140,
-                            line_linked: {
-                                opacity: 0.35
-                            }
-                        },
-                        push: {
-                            particles_nb: 3
-                        }
-                    }
-                },
-                retina_detect: true
-            });
-        }
-    });
-    </script>
 </body>
 </html>

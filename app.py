@@ -10,10 +10,11 @@ from typing import Optional, List, Dict
 import json
 import hashlib
 from datetime import datetime
-from urllib.parse import unquote
+from urllib.parse import unquote, urlencode
 import threading
 import time
 import asyncio
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from collections import OrderedDict
 import io
@@ -43,25 +44,12 @@ STREAM_PREFETCH_SIZE = 16 * 1024 * 1024  # 16MB 预读缓冲区
 FILE_HANDLE_CACHE_SIZE = 32  # 缓存的文件句柄数量
 FILE_HANDLE_TTL = 300  # 文件句柄缓存时间（秒）
 
-# 初始化应用
-app = FastAPI(title="局域网视频服务器")
-
 # 读取配置以获取 secret_key
 _config = configparser.ConfigParser()
 _config.read("config.ini", encoding='utf-8')
 _secret_key = _config.get('auth', 'secret_key', fallback='videoserver-secret-key-change-in-production')
 
 session_manager = None
-
-# 添加 Session 中间件（仅用于存储 session_id）
-# max_age 设置为30天（记住登录的最长时间），实际过期由 SessionManager 控制
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=_secret_key,
-    session_cookie="video_session_id",
-    max_age=60 * 60 * 24 * 30,  # 30天（记住登录的最大时长）
-    same_site="lax",  # 允许跨站请求但有限制
-)
 
 # 获取项目根目录
 BASE_DIR = Path(__file__).resolve().parent
@@ -192,6 +180,30 @@ class FileHandleCache:
 # 全局文件句柄缓存
 file_handle_cache = FileHandleCache()
 
+
+@asynccontextmanager
+async def app_lifespan(_: FastAPI):
+    try:
+        yield
+    finally:
+        print("🔄 关闭文件句柄缓存...")
+        file_handle_cache.close_all()
+        print("✅ 清理完成")
+
+
+# 初始化应用
+app = FastAPI(title="局域网视频服务器", lifespan=app_lifespan)
+
+# 添加 Session 中间件（仅用于存储 session_id）
+# max_age 设置为30天（记住登录的最长时间），实际过期由 SessionManager 控制
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_secret_key,
+    session_cookie="video_session_id",
+    max_age=60 * 60 * 24 * 30,  # 30天（记住登录的最大时长）
+    same_site="lax",  # 允许跨站请求但有限制
+)
+
 # ==================== 预读缓冲区 ====================
 class PrefetchBuffer:
     """预读缓冲区，在后台线程中预读取数据"""
@@ -301,6 +313,11 @@ def require_auth(request: Request):
     return True
 
 
+def get_actor_name(request: Request) -> str:
+    current_user = get_current_user(request)
+    return current_user or "guest"
+
+
 # ==================== 路由 ====================
 
 @app.get("/login", response_class=HTMLResponse)
@@ -378,6 +395,44 @@ async def index(
         return RedirectResponse(url="/login", status_code=302)
     
     directories = video_server.get_directories()
+
+    def enrich_video(video: dict) -> dict:
+        video_data = dict(video)
+        if not video_data.get("poster_url"):
+            video_data["poster_url"] = f"/api/video/thumbnail/{video_data['id']}"
+        return video_data
+
+    per_page = video_server.videos_per_page
+
+    def build_page_url(target_page: int) -> str:
+        params = {"page": target_page}
+        if search:
+            params["search"] = search
+        if browse:
+            params["browse"] = browse
+        if dir_path:
+            params["dir_path"] = dir_path
+        return f"/?{urlencode(params)}"
+
+    def build_pagination(total_items: int, total_page_count: int) -> Optional[dict]:
+        if total_page_count <= 1:
+            return None
+
+        start_item = ((page - 1) * per_page) + 1 if total_items else 0
+        end_item = min(page * per_page, total_items)
+        return {
+            "page_links": [
+                {
+                    "number": page_number,
+                    "url": build_page_url(page_number),
+                    "active": page_number == page,
+                }
+                for page_number in range(1, total_page_count + 1)
+            ],
+            "prev_url": build_page_url(page - 1) if page > 1 else None,
+            "next_url": build_page_url(page + 1) if page < total_page_count else None,
+            "summary": f"第 {start_item}-{end_item} 项 / 共 {total_items} 项",
+        }
     
     # 如果指定了浏览目录
     if browse:
@@ -385,16 +440,29 @@ async def index(
         if 'error' in browse_result:
             raise HTTPException(status_code=400, detail=browse_result['error'])
         
+        browse_videos = [enrich_video(video) for video in browse_result.get("videos", [])]
         return templates.TemplateResponse(
+            request,
             "index.html",
             {
-                "request": request,
                 "directories": directories,
-                "browse_result": browse_result,
+                "browse_result": {
+                    **browse_result,
+                    "videos": browse_videos,
+                },
+                "videos": browse_videos,
+                "featured_video": browse_videos[0] if browse_videos else None,
+                "continue_video": browse_videos[0] if browse_videos else None,
+                "recent_videos": browse_videos[:12],
                 "search": search,
                 "page": page,
                 "current_browse": browse,
                 "current_path": dir_path,
+                "directory_browse_mode": True,
+                "current_user": get_actor_name(request),
+                "total": len(browse_videos),
+                "total_pages": 1,
+                "pagination": None,
             }
         )
     
@@ -403,23 +471,32 @@ async def index(
     
     # 分页
     total = len(all_videos)
-    per_page = video_server.videos_per_page
     total_pages = (total + per_page - 1) // per_page
     page = min(page, total_pages) if total_pages > 0 else 1
     
     start = (page - 1) * per_page
-    videos = all_videos[start:start + per_page]
+    videos = [enrich_video(video) for video in all_videos[start:start + per_page]]
+    featured_video = videos[0] if videos else (enrich_video(all_videos[0]) if all_videos else None)
+    recent_videos = [enrich_video(video) for video in all_videos[:12]]
     
     return templates.TemplateResponse(
+        request,
         "index.html",
         {
-            "request": request,
             "directories": directories,
             "videos": videos,
+            "featured_video": featured_video,
+            "continue_video": featured_video,
+            "recent_videos": recent_videos,
             "search": search,
             "page": page,
             "total_pages": total_pages,
             "total": total,
+            "current_user": get_actor_name(request),
+            "current_browse": "",
+            "current_path": "",
+            "directory_browse_mode": False,
+            "pagination": build_pagination(total, total_pages),
         }
     )
 
@@ -439,10 +516,23 @@ async def play(request: Request, video_id: str):
     video_info = video_server.get_video_info(video['path'])
     video.update(video_info)
     video['id'] = video_id
+
+    next_up_videos = []
+    for candidate in video_server.scan_videos(directory=video.get("base_dir", "")):
+        if candidate["id"] == video_id:
+            continue
+        next_up_videos.append(candidate)
+        if len(next_up_videos) >= 6:
+            break
     
     return templates.TemplateResponse(
+        request,
         "play.html",
-        {"request": request, "video": video}
+        {
+            "video": video,
+            "next_up_videos": next_up_videos,
+            "current_user": get_actor_name(request),
+        }
     )
 
 
@@ -749,15 +839,6 @@ async def api_cache_status():
             **video_server.get_scan_cache_status()
         }
     }
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """应用关闭时清理资源"""
-    print("🔄 关闭文件句柄缓存...")
-    file_handle_cache.close_all()
-    print("✅ 清理完成")
-
 
 @app.get("/api/session/status")
 async def api_session_status(request: Request):

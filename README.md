@@ -37,8 +37,17 @@ directories = ~/Movies, ~/Videos, /path/to/your/videos
 ./start.sh
 
 # 方式二：手动启动
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 python app.py
+```
+
+开发测试依赖可额外安装：
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest -q
 ```
 
 ### 3. 访问网站
