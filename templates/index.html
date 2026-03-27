@@ -38,11 +38,11 @@
                 {% endif %}
             </form>
             <form class="library-browse-form" method="GET" action="/">
-                <label for="topbarBrowseSelect">Quick Directory Jump</label>
+                <label for="topbarBrowseSelect">快速切换目录</label>
                 <div class="library-select-wrap">
                     <i class="bi bi-folder2-open"></i>
                     <select id="topbarBrowseSelect" name="browse" onchange="this.form.submit()">
-                        <option value="" {% if not current_browse %}selected{% endif %}>All Libraries</option>
+                        <option value="" {% if not current_browse %}selected{% endif %}>全部片库</option>
                         {% for dir in directories %}
                         <option value="{{ dir.path }}" {% if current_browse == dir.path %}selected{% endif %}>{{ dir.name }}</option>
                         {% endfor %}
@@ -54,7 +54,7 @@
         <div class="library-actions">
             <button type="button" class="library-icon-btn library-tool-btn" data-action="refresh-library" aria-label="刷新视频库">
                 <i class="bi bi-arrow-clockwise"></i>
-                <span>Refresh Library</span>
+                <span>刷新片库</span>
             </button>
             <span class="library-user">{{ current_user }}</span>
             <a href="/logout" class="library-icon-btn" aria-label="退出登录">
@@ -67,7 +67,7 @@
         <section class="hero-spotlight {% if not featured_video %}is-empty{% endif %}">
             {% if featured_video %}
             <div class="hero-copy">
-                <p class="hero-kicker">{% if directory_browse_mode %}Folder View{% else %}Continue Watching{% endif %}</p>
+                <p class="hero-kicker">{% if directory_browse_mode %}目录视图{% else %}继续观看{% endif %}</p>
                 <h1>{{ featured_video.name }}</h1>
                 <p class="hero-description">
                     {% if featured_video.parent_dir %}
@@ -106,7 +106,7 @@
             </div>
             {% else %}
             <div class="hero-empty">
-                <p class="hero-kicker">Library Offline</p>
+                <p class="hero-kicker">片库离线</p>
                 <h1>当前目录里还没有可展示的视频</h1>
                 <p class="hero-description">检查配置目录、搜索条件，或者回到首页重新选择视频库。</p>
             </div>
@@ -126,7 +126,7 @@
             {% if search or current_browse or current_path %}
             <a class="context-reset-link" href="/">
                 <i class="bi bi-x-circle"></i>
-                Clear Filters
+                清除筛选
             </a>
             {% endif %}
         </section>
@@ -134,8 +134,8 @@
         <section class="library-insights-panel">
             <div class="library-section-head">
                 <div>
-                    <p class="toolbar-label">Library Pulse</p>
-                    <h3>Spotlight Lane</h3>
+                    <p class="toolbar-label">片库脉冲</p>
+                    <h3>聚焦片段</h3>
                 </div>
                 <span>{{ spotlight_lane.detail }}</span>
             </div>
@@ -148,7 +148,7 @@
                 </article>
                 {% endfor %}
                 <article class="insight-card insight-card-spotlight">
-                    <span class="insight-label">Spotlight Lane</span>
+                    <span class="insight-label">聚焦片段</span>
                     <strong>{{ spotlight_lane.title }}</strong>
                     <small>{{ spotlight_lane.count }} items are feeding this lane right now.</small>
                 </article>
@@ -158,8 +158,8 @@
         <section class="curated-shelves-panel">
             <div class="library-section-head">
                 <div>
-                    <p class="toolbar-label">Curated Shelves</p>
-                    <h3>Continue Watching</h3>
+                    <p class="toolbar-label">精选分区</p>
+                    <h3>继续观看</h3>
                 </div>
                 <span>来自本机浏览器的播放进度会在这里继续接力。</span>
             </div>
@@ -175,7 +175,7 @@
                 <div class="curated-shelf-block">
                     <div class="library-section-head">
                         <div>
-                            <p class="toolbar-label">Curated Shelf</p>
+                            <p class="toolbar-label">精选分区</p>
                             <h3>{{ shelf["title"] }}</h3>
                         </div>
                         <span>{{ shelf["subtitle"] }}</span>
@@ -201,8 +201,8 @@
         <section class="directory-browser">
             <div class="directory-browser-head">
                 <div>
-                    <p class="toolbar-label">Browse State</p>
-                    <h3>Current Lane</h3>
+                    <p class="toolbar-label">浏览状态</p>
+                    <h3>当前分区</h3>
                 </div>
                 <div class="directory-state-chips">
                     {% for chip in context_chips %}
@@ -215,12 +215,12 @@
                 {% if browse_result and browse_result.parent_path %}
                 <a class="directory-jump-link" href="/?browse={{ current_browse | urlencode }}&dir_path={{ browse_result.parent_path | urlencode }}">
                     <i class="bi bi-arrow-90deg-left"></i>
-                    Back to Parent Folder
+                    返回上一级目录
                 </a>
                 {% endif %}
                 <a class="directory-jump-link" href="/?browse={{ current_browse | urlencode }}">
                     <i class="bi bi-arrow-up-left-circle"></i>
-                    Back to Folder Root
+                    返回目录根
                 </a>
             </div>
             {% endif %}
@@ -248,7 +248,7 @@
             <div class="directory-snapshot">
                 <div class="library-section-head">
                     <div>
-                        <p class="toolbar-label">Directory Context</p>
+                        <p class="toolbar-label">目录上下文</p>
                         <h3>{{ directory_snapshot.title }}</h3>
                     </div>
                 </div>
@@ -287,7 +287,7 @@
 
         <section class="library-grid-section">
             <div class="library-section-head">
-                <h3>Recently Added</h3>
+                <h3>最近入库</h3>
                 <span>{% if search %}搜索结果{% else %}最新入库{% endif %}</span>
             </div>
 

@@ -401,8 +401,8 @@ async def index(
         video_data = dict(video)
         if not video_data.get("poster_url"):
             video_data["poster_url"] = f"/api/video/thumbnail/{video_data['id']}"
-        video_data["display_folder"] = video_data.get("parent_dir") or "Library Root"
-        video_data["stream_state_label"] = "Ready to Stream"
+        video_data["display_folder"] = video_data.get("parent_dir") or "片库根目录"
+        video_data["stream_state_label"] = "可立即播放"
         return video_data
 
     per_page = video_server.videos_per_page
@@ -438,22 +438,22 @@ async def index(
         }
 
     def build_library_insights(view_videos: list[dict], total_items: int, browse_mode: bool) -> list[dict]:
-        lane_label = "Folder View" if browse_mode else ("Search Results" if search else "Full Library")
+        lane_label = "目录浏览" if browse_mode else ("搜索结果" if search else "全部片库")
         return [
-            {"label": "Visible Now", "value": str(len(view_videos)), "meta": "当前画面"},
-            {"label": "Directory Sets", "value": str(len(directories)), "meta": "已连接片库"},
-            {"label": "Active Lane", "value": lane_label, "meta": "浏览模式"},
-            {"label": "Library Crew", "value": current_user, "meta": f"总计 {total_items} 项"},
+            {"label": "当前可见", "value": str(len(view_videos)), "meta": "当前画面"},
+            {"label": "片库数量", "value": str(len(directories)), "meta": "已连接片库"},
+            {"label": "当前模式", "value": lane_label, "meta": "浏览状态"},
+            {"label": "当前用户", "value": current_user, "meta": f"总计 {total_items} 项"},
         ]
 
     def build_context_chips(total_items: int, browse_mode: bool) -> list[str]:
         chips = []
         if browse_mode:
-            chips.append("Directory Browser")
+            chips.append("目录浏览")
         elif search:
-            chips.append(f"Search: {search}")
+            chips.append(f"搜索：{search}")
         else:
-            chips.append("All Media")
+            chips.append("全部视频")
 
         if current_browse := browse:
             base_name = next((directory["name"] for directory in directories if directory["path"] == current_browse), "Directory")
@@ -467,17 +467,17 @@ async def index(
 
     def build_spotlight_lane(view_videos: list[dict], browse_mode: bool) -> dict:
         if search:
-            title = "Search Spotlight"
+            title = "搜索聚焦"
             detail = f"正在聚焦与 “{search}” 相关的片段。"
         elif browse_mode and dir_path:
-            title = "Folder Stream"
+            title = "目录流"
             detail = f"当前停靠在 {dir_path}，继续向下浏览这一层目录。"
         elif browse_mode and browse:
             base_name = next((directory["name"] for directory in directories if directory["path"] == browse), "Directory")
-            title = "Directory Current"
+            title = "当前目录"
             detail = f"{base_name} 正在作为主浏览航道显示。"
         else:
-            title = "Fresh Intake"
+            title = "最新入库"
             detail = "新入库与最近更新内容会优先出现在这一屏。"
 
         return {
@@ -488,58 +488,57 @@ async def index(
 
     def build_view_feedback(total_items: int, browse_mode: bool) -> dict:
         if search:
-            noun = "title" if total_items == 1 else "titles"
             return {
-                "kicker": "Search Results",
-                "title": f'Results for "{search}"',
-                "detail": f"{total_items} matching {noun}",
+                "kicker": "搜索结果",
+                "title": f'“{search}” 的搜索结果',
+                "detail": f"共匹配 {total_items} 个视频",
             }
         if browse_mode and dir_path:
             return {
-                "kicker": "Directory Focus",
-                "title": f"Inside {dir_path}",
-                "detail": f"{total_items} videos in this lane",
+                "kicker": "目录焦点",
+                "title": f"{dir_path} 内的内容",
+                "detail": f"这个目录下共有 {total_items} 个视频",
             }
         if browse_mode and browse:
             base_name = next((directory["name"] for directory in directories if directory["path"] == browse), "Directory")
             return {
-                "kicker": "Directory Focus",
+                "kicker": "目录焦点",
                 "title": base_name,
-                "detail": f"{total_items} videos ready to browse",
+                "detail": f"当前可浏览 {total_items} 个视频",
             }
         return {
-            "kicker": "Media Library",
-            "title": "Recently Added",
-            "detail": f"{total_items} videos in the active library",
+            "kicker": "媒体片库",
+            "title": "最近入库",
+            "detail": f"当前片库共有 {total_items} 个视频",
         }
 
     def build_empty_state(browse_mode: bool) -> dict:
         if search:
             return {
-                "title": f'No matches for "{search}"',
+                "title": f'没有找到与 “{search}” 相关的视频',
                 "detail": "试试更短的关键词，或者直接回到全库重新浏览。",
-                "action_label": "Reset Search",
+                "action_label": "重置搜索",
                 "action_href": "/",
             }
         if browse_mode and dir_path:
             reset_params = {"browse": browse} if browse else {}
             return {
-                "title": "This folder is quiet right now",
+                "title": "这个目录当前没有可显示的视频",
                 "detail": "当前子目录没有可显示的视频，可以返回上一级或回到目录根。",
-                "action_label": "Back to Folder Root",
+                "action_label": "返回目录根",
                 "action_href": f"/?{urlencode(reset_params)}" if reset_params else "/",
             }
         return {
             "title": "没有找到匹配的视频",
             "detail": "你可以切换目录、调整搜索词，或者检查当前视频目录配置。",
-            "action_label": "Back to Library",
+            "action_label": "回到片库",
             "action_href": "/",
         }
 
     def build_curated_shelves(view_videos: list[dict], recent_candidates: list[dict]) -> list[dict]:
         shelves = [
             {
-                "title": "Recent Drops",
+                "title": "最近入库",
                 "subtitle": "刚更新或刚入库的内容优先在这里出现。",
                 "items": recent_candidates[:6],
             }
@@ -555,7 +554,7 @@ async def index(
         if folder_picks:
             shelves.append(
                 {
-                    "title": "Folder Picks",
+                    "title": "目录精选",
                     "subtitle": "沿着当前目录继续往下看，不用重新筛选。",
                     "items": folder_picks,
                 }
@@ -573,22 +572,22 @@ async def index(
             current_label = dir_path or "Root"
             folder_count = len((browse_result or {}).get("folders", []))
             return {
-                "title": "Directory Snapshot",
+                "title": "目录快照",
                 "items": [
-                    {"label": "Library", "value": base_name},
-                    {"label": "Current Path", "value": current_label},
-                    {"label": "Subfolders", "value": str(folder_count)},
-                    {"label": "Videos in View", "value": str(total_items)},
+                    {"label": "片库", "value": base_name},
+                    {"label": "当前路径", "value": current_label},
+                    {"label": "子目录数", "value": str(folder_count)},
+                    {"label": "当前视频数", "value": str(total_items)},
                 ],
             }
 
         return {
-            "title": "Library Snapshot",
+            "title": "片库快照",
             "items": [
-                {"label": "Libraries", "value": str(len(directories))},
-                {"label": "Current Path", "value": "All Media"},
-                {"label": "Search", "value": search or "Off"},
-                {"label": "Videos in View", "value": str(total_items)},
+                {"label": "片库数量", "value": str(len(directories))},
+                {"label": "当前路径", "value": "全部视频"},
+                {"label": "搜索", "value": search or "关闭"},
+                {"label": "当前视频数", "value": str(total_items)},
             ],
         }
     
@@ -703,7 +702,7 @@ async def play(request: Request, video_id: str):
             library_fallback_videos.append(candidate)
 
     next_up_videos = (same_folder_videos + library_fallback_videos)[:6]
-    next_up_context_label = "From This Folder" if same_folder_videos else "From This Library"
+    next_up_context_label = "来自当前目录" if same_folder_videos else "来自当前片库"
 
     jump_to_next = next_up_videos[0] if next_up_videos else None
     browse_directory = video.get("base_dir", "")
@@ -714,7 +713,7 @@ async def play(request: Request, video_id: str):
         if browse_path:
             browse_params["dir_path"] = browse_path
         library_browse_href = f"/?{urlencode(browse_params)}"
-    player_back_label = "Back to Folder" if browse_path else "Back to Library"
+    player_back_label = "返回目录" if browse_path else "返回片库"
     
     return templates.TemplateResponse(
         request,
@@ -728,7 +727,7 @@ async def play(request: Request, video_id: str):
             "player_back_href": library_browse_href,
             "player_back_label": player_back_label,
             "library_browse_href": library_browse_href,
-            "library_browse_label": "Browse This Folder" if browse_path else "Browse Library Root",
+            "library_browse_label": "浏览当前目录" if browse_path else "浏览片库根目录",
         }
     )
 

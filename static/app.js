@@ -137,7 +137,7 @@ function initLibraryActions() {
                 button.disabled = false;
                 setTimeout(() => {
                     if (label) {
-                        label.textContent = originalLabel || 'Refresh Library';
+                        label.textContent = originalLabel || '刷新片库';
                     }
                 }, 1800);
             }

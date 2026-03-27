@@ -22,7 +22,7 @@
         </a>
         <div class="player-topbar-meta">
             <span>{{ current_user }}</span>
-            <strong>Now Playing</strong>
+            <strong>正在播放</strong>
         </div>
     </header>
 
@@ -51,17 +51,17 @@
                     </video>
                     <div class="player-overlay-panel">
                         <div class="player-overlay-copy">
-                            <span class="player-overlay-kicker">Now Streaming</span>
+                            <span class="player-overlay-kicker">正在播放</span>
                             <strong>{{ video.name }}</strong>
                             <div class="player-overlay-meta">
-                                <span>{{ video.parent_dir or "Root Library" }}</span>
+                                <span>{{ video.parent_dir or "片库根目录" }}</span>
                                 <span>{{ video.modified }}</span>
                                 <span>{{ video.duration_formatted or "--:--" }}</span>
                             </div>
                         </div>
                         {% if jump_to_next %}
                         <a class="player-overlay-action" href="/play/{{ jump_to_next.id }}">
-                            <span>Jump to Next</span>
+                            <span>跳到下一条</span>
                             <strong>{{ jump_to_next.name }}</strong>
                         </a>
                         {% endif %}
@@ -76,7 +76,7 @@
         <aside class="player-sidebar">
             <section class="player-panel">
                 <div class="player-panel-head">
-                    <h2>Playback Details</h2>
+                    <h2>播放信息</h2>
                     <span>{{ video.modified }}</span>
                 </div>
                 <a class="player-context-link" href="{{ library_browse_href }}">
@@ -114,7 +114,7 @@
 
             <section class="player-panel next-up-panel">
                 <div class="player-panel-head">
-                    <h2>Next Up</h2>
+                    <h2>接下来播放</h2>
                     <span>{{ next_up_context_label }} · {{ next_up_videos|length }} 项</span>
                 </div>
                 <div class="next-up-list">
@@ -137,8 +137,8 @@
 
             <section class="player-panel shortcuts-panel">
                 <div class="player-panel-head">
-                    <h2>Shortcuts</h2>
-                    <span>Keyboard</span>
+                    <h2>快捷键</h2>
+                    <span>键盘控制</span>
                 </div>
                 <div class="shortcut-grid">
                     <span><kbd>Space</kbd> 播放/暂停</span>
