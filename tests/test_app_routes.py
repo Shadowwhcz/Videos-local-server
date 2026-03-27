@@ -98,6 +98,8 @@ def test_play_renders_current_folder_browse_link(client: AppClient):
     assert response.status_code == 200
     assert "Browse This Folder" in response.text
     assert "dir_path=Season+1%2FArc+One" in response.text
+    assert 'class="player-back-link"' in response.text
+    assert 'href="/?browse=%2Flibrary&amp;dir_path=Season+1%2FArc+One"' in response.text
 
 
 def test_play_prioritizes_same_folder_next_up(client: AppClient):
@@ -105,3 +107,10 @@ def test_play_prioritizes_same_folder_next_up(client: AppClient):
     assert response.status_code == 200
     assert "From This Folder" in response.text
     assert "Episode 4.mp4" in response.text
+
+
+def test_play_renders_resolution_in_details(client: AppClient):
+    response = client.get("/play/video-1")
+    assert response.status_code == 200
+    assert "分辨率" in response.text
+    assert "1920x1080" in response.text

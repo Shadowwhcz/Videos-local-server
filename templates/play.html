@@ -16,9 +16,9 @@
     <div class="cyber-orb cyber-orb-a"></div>
 
     <header class="player-topbar">
-        <a href="/" class="player-back-link">
+        <a href="{{ player_back_href }}" class="player-back-link">
             <i class="bi bi-arrow-left"></i>
-            <span>Library</span>
+            <span>{{ player_back_label }}</span>
         </a>
         <div class="player-topbar-meta">
             <span>{{ current_user }}</span>
@@ -98,6 +98,11 @@
                         <i class="bi bi-clock-history"></i>
                         <span>时长</span>
                         <strong>{{ video.duration_formatted or "--:--" }}</strong>
+                    </div>
+                    <div class="detail-item">
+                        <i class="bi bi-badge-hd"></i>
+                        <span>分辨率</span>
+                        <strong>{{ video.resolution or "--" }}</strong>
                     </div>
                     <div class="detail-item">
                         <i class="bi bi-folder2-open"></i>

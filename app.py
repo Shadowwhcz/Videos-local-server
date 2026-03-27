@@ -681,6 +681,7 @@ async def play(request: Request, video_id: str):
         if browse_path:
             browse_params["dir_path"] = browse_path
         library_browse_href = f"/?{urlencode(browse_params)}"
+    player_back_label = "Back to Folder" if browse_path else "Back to Library"
     
     return templates.TemplateResponse(
         request,
@@ -691,6 +692,8 @@ async def play(request: Request, video_id: str):
             "next_up_context_label": next_up_context_label,
             "current_user": get_actor_name(request),
             "jump_to_next": jump_to_next,
+            "player_back_href": library_browse_href,
+            "player_back_label": player_back_label,
             "library_browse_href": library_browse_href,
             "library_browse_label": "Browse This Folder" if browse_path else "Browse Library Root",
         }
