@@ -2734,6 +2734,23 @@ footer small {
     letter-spacing: 0.14em;
 }
 
+.context-reset-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    justify-self: flex-end;
+    padding: 0.8rem 1rem;
+    border-radius: 999px;
+    text-decoration: none;
+    color: #ffffff;
+    background: rgba(13, 33, 52, 0.78);
+    box-shadow: inset 0 0 0 1px rgba(129, 236, 255, 0.12);
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
 .directory-browser {
     display: grid;
     gap: 1rem;
@@ -3439,6 +3456,11 @@ footer small {
     .directory-browser-head {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .context-reset-link {
+        width: 100%;
+        justify-content: center;
     }
 
     .pagination-actions {

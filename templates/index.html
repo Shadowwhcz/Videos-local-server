@@ -108,6 +108,12 @@
                 <span><i class="bi bi-collection-play"></i>{{ total }} 个视频</span>
                 <span><i class="bi bi-grid-3x3-gap"></i>第 {{ page }} / {{ total_pages if total_pages > 0 else 1 }} 页</span>
             </div>
+            {% if search or current_browse or current_path %}
+            <a class="context-reset-link" href="/">
+                <i class="bi bi-x-circle"></i>
+                Clear Filters
+            </a>
+            {% endif %}
         </section>
 
         <section class="library-insights-panel">

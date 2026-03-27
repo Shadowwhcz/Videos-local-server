@@ -41,6 +41,12 @@ def test_index_renders_curated_shelves(client: AppClient):
     assert "Recent Drops" in response.text
 
 
+def test_index_renders_clear_filters_when_context_is_active(client: AppClient):
+    response = client.get("/?search=sample&browse=/library&dir_path=Season%201")
+    assert response.status_code == 200
+    assert "Clear Filters" in response.text
+
+
 def test_refresh_library_endpoint_rebuilds_scan_cache(client: AppClient):
     response = client.post("/api/library/refresh")
     assert response.status_code == 200
