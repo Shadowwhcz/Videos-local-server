@@ -36,6 +36,7 @@ def client(tmp_path, monkeypatch):
         "video-1": tmp_path / "sample.mp4",
         "video-2": tmp_path / "episode-2.mp4",
         "video-3": tmp_path / "episode-3.mp4",
+        "video-4": tmp_path / "episode-4.mp4",
     }
     for media_file in media_files.values():
         media_file.write_bytes(b"fake video bytes")
@@ -77,6 +78,18 @@ def client(tmp_path, monkeypatch):
             "ext": "MP4",
             "base_dir": library_root,
         },
+        {
+            "id": "video-4",
+            "name": "Episode 4.mp4",
+            "path": str(media_files["video-4"]),
+            "rel_path": "Season 1/Episode 4.mp4",
+            "parent_dir": "Season 1",
+            "size": media_files["video-4"].stat().st_size,
+            "size_mb": 0.1,
+            "modified": "2026-03-24 18:20",
+            "ext": "MP4",
+            "base_dir": library_root,
+        },
     ]
 
     def fake_scan_videos(search="", directory=None, use_cache=True):
@@ -105,7 +118,7 @@ def client(tmp_path, monkeypatch):
                 "current_path": dir_path,
                 "parent_path": "",
                 "folders": [{"name": "Arc One", "path": "Season 1/Arc One"}],
-                "videos": [fake_videos[1]],
+                "videos": [fake_videos[1], fake_videos[3]],
             }
 
         return {

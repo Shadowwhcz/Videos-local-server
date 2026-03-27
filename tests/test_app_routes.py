@@ -98,3 +98,10 @@ def test_play_renders_current_folder_browse_link(client: AppClient):
     assert response.status_code == 200
     assert "Browse This Folder" in response.text
     assert "dir_path=Season+1%2FArc+One" in response.text
+
+
+def test_play_prioritizes_same_folder_next_up(client: AppClient):
+    response = client.get("/play/video-2")
+    assert response.status_code == 200
+    assert "From This Folder" in response.text
+    assert "Episode 4.mp4" in response.text

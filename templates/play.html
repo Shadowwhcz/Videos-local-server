@@ -110,7 +110,7 @@
             <section class="player-panel next-up-panel">
                 <div class="player-panel-head">
                     <h2>Next Up</h2>
-                    <span>{{ next_up_videos|length }} 项</span>
+                    <span>{{ next_up_context_label }} · {{ next_up_videos|length }} 项</span>
                 </div>
                 <div class="next-up-list">
                     {% for item in next_up_videos %}

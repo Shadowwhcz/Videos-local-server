@@ -658,13 +658,19 @@ async def play(request: Request, video_id: str):
     video.update(video_info)
     video['id'] = video_id
 
-    next_up_videos = []
+    same_folder_videos = []
+    library_fallback_videos = []
+    current_parent_dir = video.get("parent_dir", "") or ""
     for candidate in video_server.scan_videos(directory=video.get("base_dir", "")):
         if candidate["id"] == video_id:
             continue
-        next_up_videos.append(candidate)
-        if len(next_up_videos) >= 6:
-            break
+        if (candidate.get("parent_dir", "") or "") == current_parent_dir:
+            same_folder_videos.append(candidate)
+        else:
+            library_fallback_videos.append(candidate)
+
+    next_up_videos = (same_folder_videos + library_fallback_videos)[:6]
+    next_up_context_label = "From This Folder" if same_folder_videos else "From This Library"
 
     jump_to_next = next_up_videos[0] if next_up_videos else None
     browse_directory = video.get("base_dir", "")
@@ -682,6 +688,7 @@ async def play(request: Request, video_id: str):
         {
             "video": video,
             "next_up_videos": next_up_videos,
+            "next_up_context_label": next_up_context_label,
             "current_user": get_actor_name(request),
             "jump_to_next": jump_to_next,
             "library_browse_href": library_browse_href,
