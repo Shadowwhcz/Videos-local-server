@@ -218,9 +218,15 @@
                 <a href="/?browse={{ current_browse | urlencode }}">{{ base_name or '目录' }}</a>
                 {% endif %}
                 {% if current_path %}
+                {% set crumb = namespace(path='') %}
                 {% for part in current_path.split('/') %}
                 <span><i class="bi bi-chevron-right"></i></span>
+                {% set crumb.path = part if not crumb.path else crumb.path ~ '/' ~ part %}
+                {% if not loop.last %}
+                <a href="/?browse={{ current_browse | urlencode }}&dir_path={{ crumb.path | urlencode }}">{{ part }}</a>
+                {% else %}
                 <span>{{ part }}</span>
+                {% endif %}
                 {% endfor %}
                 {% endif %}
             </div>

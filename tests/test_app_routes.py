@@ -32,6 +32,7 @@ def test_index_renders_back_to_parent_folder_for_nested_directory(client: AppCli
     assert response.status_code == 200
     assert "Back to Parent Folder" in response.text
     assert "dir_path=Season%201" in response.text
+    assert '>Season 1</a>' in response.text
 
 
 def test_index_renders_library_insights_and_refresh_actions(client: AppClient):
