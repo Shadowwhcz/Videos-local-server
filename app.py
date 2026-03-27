@@ -560,6 +560,35 @@ async def index(
             )
 
         return shelves
+
+    def build_directory_snapshot(
+        total_items: int,
+        browse_mode: bool,
+        browse_result: Optional[dict] = None,
+    ) -> dict:
+        if browse_mode and browse:
+            base_name = next((directory["name"] for directory in directories if directory["path"] == browse), "Directory")
+            current_label = dir_path or "Root"
+            folder_count = len((browse_result or {}).get("folders", []))
+            return {
+                "title": "Directory Snapshot",
+                "items": [
+                    {"label": "Library", "value": base_name},
+                    {"label": "Current Path", "value": current_label},
+                    {"label": "Subfolders", "value": str(folder_count)},
+                    {"label": "Videos in View", "value": str(total_items)},
+                ],
+            }
+
+        return {
+            "title": "Library Snapshot",
+            "items": [
+                {"label": "Libraries", "value": str(len(directories))},
+                {"label": "Current Path", "value": "All Media"},
+                {"label": "Search", "value": search or "Off"},
+                {"label": "Videos in View", "value": str(total_items)},
+            ],
+        }
     
     # 如果指定了浏览目录
     if browse:
@@ -596,6 +625,7 @@ async def index(
                 "context_chips": build_context_chips(total_items, True),
                 "spotlight_lane": build_spotlight_lane(browse_videos, True),
                 "curated_shelves": build_curated_shelves(browse_videos, recent_videos),
+                "directory_snapshot": build_directory_snapshot(total_items, True, browse_result),
                 "view_feedback": build_view_feedback(total_items, True),
                 "empty_state": build_empty_state(True),
             }
@@ -636,6 +666,7 @@ async def index(
             "context_chips": build_context_chips(total, False),
             "spotlight_lane": build_spotlight_lane(videos, False),
             "curated_shelves": build_curated_shelves(videos, recent_videos),
+            "directory_snapshot": build_directory_snapshot(total, False),
             "view_feedback": build_view_feedback(total, False),
             "empty_state": build_empty_state(False),
         }

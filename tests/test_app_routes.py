@@ -35,6 +35,16 @@ def test_index_renders_back_to_parent_folder_for_nested_directory(client: AppCli
     assert '>Season 1</a>' in response.text
 
 
+def test_index_renders_directory_snapshot_for_browse_context(client: AppClient):
+    response = client.get("/?browse=/library&dir_path=Season%201")
+    assert response.status_code == 200
+    assert "Directory Snapshot" in response.text
+    assert "Subfolders" in response.text
+    assert "Videos in View" in response.text
+    assert ">1<" in response.text
+    assert ">2<" in response.text
+
+
 def test_index_renders_library_insights_and_refresh_actions(client: AppClient):
     response = client.get("/")
     assert response.status_code == 200

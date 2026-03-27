@@ -245,6 +245,23 @@
                 {% endif %}
             </div>
 
+            <div class="directory-snapshot">
+                <div class="library-section-head">
+                    <div>
+                        <p class="toolbar-label">Directory Context</p>
+                        <h3>{{ directory_snapshot.title }}</h3>
+                    </div>
+                </div>
+                <div class="directory-snapshot-grid">
+                    {% for item in directory_snapshot["items"] %}
+                    <article class="directory-snapshot-card">
+                        <span>{{ item.label }}</span>
+                        <strong>{{ item.value }}</strong>
+                    </article>
+                    {% endfor %}
+                </div>
+            </div>
+
             <div class="directory-pills">
                 {% for dir in directories %}
                 <a class="directory-pill {% if current_browse == dir.path %}active{% endif %}" href="/?browse={{ dir.path | urlencode }}">
