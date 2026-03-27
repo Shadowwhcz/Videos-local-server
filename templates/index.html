@@ -101,8 +101,9 @@
 
         <section class="library-toolbar">
             <div>
-                <p class="toolbar-label">{% if directory_browse_mode %}Directory Browser{% else %}Media Library{% endif %}</p>
-                <h2>{% if directory_browse_mode %}按文件夹浏览{% else %}Recently Added{% endif %}</h2>
+                <p class="toolbar-label">{{ view_feedback.kicker }}</p>
+                <h2>{{ view_feedback.title }}</h2>
+                <div class="toolbar-detail">{{ view_feedback.detail }}</div>
             </div>
             <div class="toolbar-stats">
                 <span><i class="bi bi-collection-play"></i>{{ total }} 个视频</span>

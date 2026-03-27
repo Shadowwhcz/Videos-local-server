@@ -484,6 +484,33 @@ async def index(
             "count": len(view_videos),
         }
 
+    def build_view_feedback(total_items: int, browse_mode: bool) -> dict:
+        if search:
+            noun = "title" if total_items == 1 else "titles"
+            return {
+                "kicker": "Search Results",
+                "title": f'Results for "{search}"',
+                "detail": f"{total_items} matching {noun}",
+            }
+        if browse_mode and dir_path:
+            return {
+                "kicker": "Directory Focus",
+                "title": f"Inside {dir_path}",
+                "detail": f"{total_items} videos in this lane",
+            }
+        if browse_mode and browse:
+            base_name = next((directory["name"] for directory in directories if directory["path"] == browse), "Directory")
+            return {
+                "kicker": "Directory Focus",
+                "title": base_name,
+                "detail": f"{total_items} videos ready to browse",
+            }
+        return {
+            "kicker": "Media Library",
+            "title": "Recently Added",
+            "detail": f"{total_items} videos in the active library",
+        }
+
     def build_curated_shelves(view_videos: list[dict], recent_candidates: list[dict]) -> list[dict]:
         shelves = [
             {
@@ -546,6 +573,7 @@ async def index(
                 "context_chips": build_context_chips(total_items, True),
                 "spotlight_lane": build_spotlight_lane(browse_videos, True),
                 "curated_shelves": build_curated_shelves(browse_videos, recent_videos),
+                "view_feedback": build_view_feedback(total_items, True),
             }
         )
     
@@ -584,6 +612,7 @@ async def index(
             "context_chips": build_context_chips(total, False),
             "spotlight_lane": build_spotlight_lane(videos, False),
             "curated_shelves": build_curated_shelves(videos, recent_videos),
+            "view_feedback": build_view_feedback(total, False),
         }
     )
 

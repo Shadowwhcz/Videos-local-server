@@ -55,6 +55,14 @@ def test_index_renders_clear_filters_when_context_is_active(client: AppClient):
     assert "Clear Filters" in response.text
 
 
+def test_index_renders_search_view_feedback(client: AppClient):
+    response = client.get("/?search=sample")
+    assert response.status_code == 200
+    assert "Results for" in response.text
+    assert "sample" in response.text
+    assert "1 matching title" in response.text
+
+
 def test_refresh_library_endpoint_rebuilds_scan_cache(client: AppClient):
     response = client.post("/api/library/refresh")
     assert response.status_code == 200

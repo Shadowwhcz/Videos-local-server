@@ -2722,6 +2722,13 @@ footer small {
     letter-spacing: -0.03em;
 }
 
+.toolbar-detail {
+    margin-top: 0.5rem;
+    color: #9eacc0;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
 .toolbar-stats,
 .player-panel-head span,
 .library-section-head span {
