@@ -667,6 +667,14 @@ async def play(request: Request, video_id: str):
             break
 
     jump_to_next = next_up_videos[0] if next_up_videos else None
+    browse_directory = video.get("base_dir", "")
+    browse_path = video.get("parent_dir", "") or ""
+    library_browse_href = "/"
+    if browse_directory:
+        browse_params = {"browse": browse_directory}
+        if browse_path:
+            browse_params["dir_path"] = browse_path
+        library_browse_href = f"/?{urlencode(browse_params)}"
     
     return templates.TemplateResponse(
         request,
@@ -676,6 +684,8 @@ async def play(request: Request, video_id: str):
             "next_up_videos": next_up_videos,
             "current_user": get_actor_name(request),
             "jump_to_next": jump_to_next,
+            "library_browse_href": library_browse_href,
+            "library_browse_label": "Browse This Folder" if browse_path else "Browse Library Root",
         }
     )
 

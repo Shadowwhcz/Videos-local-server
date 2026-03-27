@@ -41,6 +41,8 @@ def test_index_renders_library_insights_and_refresh_actions(client: AppClient):
     assert "Library Pulse" in response.text
     assert "Refresh Library" in response.text
     assert "Spotlight Lane" in response.text
+    assert "Quick Directory Jump" in response.text
+    assert 'name="browse"' in response.text
 
 
 def test_index_renders_curated_shelves(client: AppClient):
@@ -89,3 +91,10 @@ def test_play_renders_player_shell(client: AppClient):
     assert "Episode 3.mp4" in response.text
     assert "Now Streaming" in response.text
     assert "Jump to Next" in response.text
+
+
+def test_play_renders_current_folder_browse_link(client: AppClient):
+    response = client.get("/play/video-3")
+    assert response.status_code == 200
+    assert "Browse This Folder" in response.text
+    assert "dir_path=Season+1%2FArc+One" in response.text

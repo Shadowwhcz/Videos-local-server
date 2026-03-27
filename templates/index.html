@@ -26,16 +26,30 @@
             </span>
         </a>
 
-        <form class="library-search" method="GET" action="/">
-            <i class="bi bi-search"></i>
-            <input type="text" name="search" value="{{ search }}" placeholder="搜索视频、剧集、目录...">
-            {% if current_browse %}
-            <input type="hidden" name="browse" value="{{ current_browse }}">
-            {% endif %}
-            {% if current_path %}
-            <input type="hidden" name="dir_path" value="{{ current_path }}">
-            {% endif %}
-        </form>
+        <div class="library-control-cluster">
+            <form class="library-search" method="GET" action="/">
+                <i class="bi bi-search"></i>
+                <input type="text" name="search" value="{{ search }}" placeholder="搜索视频、剧集、目录...">
+                {% if current_browse %}
+                <input type="hidden" name="browse" value="{{ current_browse }}">
+                {% endif %}
+                {% if current_path %}
+                <input type="hidden" name="dir_path" value="{{ current_path }}">
+                {% endif %}
+            </form>
+            <form class="library-browse-form" method="GET" action="/">
+                <label for="topbarBrowseSelect">Quick Directory Jump</label>
+                <div class="library-select-wrap">
+                    <i class="bi bi-folder2-open"></i>
+                    <select id="topbarBrowseSelect" name="browse" onchange="this.form.submit()">
+                        <option value="" {% if not current_browse %}selected{% endif %}>All Libraries</option>
+                        {% for dir in directories %}
+                        <option value="{{ dir.path }}" {% if current_browse == dir.path %}selected{% endif %}>{{ dir.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </form>
+        </div>
 
         <div class="library-actions">
             <button type="button" class="library-icon-btn library-tool-btn" data-action="refresh-library" aria-label="刷新视频库">
