@@ -161,30 +161,35 @@ function initContinueWatchingShelf() {
         .map((video) => {
             const rawPosition = localStorage.getItem(`video_pos_${video.id}`);
             const position = rawPosition ? parseFloat(rawPosition) : 0;
-            return position > 0 ? { video, position } : null;
+            const lastUpdated = parseInt(localStorage.getItem(`video_pos_${video.id}_updated_at`) || '0', 10);
+            const durationSeconds = parseFloat(localStorage.getItem(`video_duration_seconds_${video.id}`) || '0');
+            return position > 0 ? { video, position, lastUpdated, durationSeconds } : null;
         })
         .filter(Boolean)
-        .sort((a, b) => b.position - a.position)
+        .sort((a, b) => b.lastUpdated - a.lastUpdated)
         .slice(0, 6);
 
     if (progressItems.length === 0) {
         return;
     }
 
-    shelf.innerHTML = progressItems.map(({ video, position }) => {
-        const minutes = Math.floor(position / 60);
-        const seconds = Math.floor(position % 60).toString().padStart(2, '0');
+    shelf.innerHTML = progressItems.map(({ video, position, durationSeconds, lastUpdated }) => {
+        const progressPercent = durationSeconds > 0
+            ? Math.max(4, Math.min(97, Math.round((position / durationSeconds) * 100)))
+            : 42;
         const posterUrl = video.poster_url || `/api/video/thumbnail/${video.id}`;
+        const lastWatched = lastUpdated ? formatRelativeTime(lastUpdated) : 'Recently watched';
         return `
             <a class="curated-shelf-card continue-card" href="/play/${video.id}">
                 <div class="curated-shelf-thumb">
                     <img src="${posterUrl}" alt="${escapeHtml(video.name)}" onerror="this.style.display='none'">
                     <div class="curated-shelf-fallback"><i class="bi bi-play-circle"></i></div>
-                    <div class="continue-progress-bar"><span></span></div>
+                    <div class="continue-progress-bar"><span style="width: ${progressPercent}%;"></span></div>
                 </div>
                 <div class="curated-shelf-copy">
                     <strong>${escapeHtml(video.name)}</strong>
-                    <span>Resume from ${minutes}:${seconds}</span>
+                    <span>Resume from ${formatPlaybackTime(position)}</span>
+                    <small>${escapeHtml(lastWatched)}</small>
                 </div>
             </a>
         `;
@@ -198,6 +203,25 @@ function escapeHtml(value) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+function formatPlaybackTime(secondsValue) {
+    const totalSeconds = Math.max(0, Math.floor(secondsValue));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = String(totalSeconds % 60).padStart(2, '0');
+    if (hours > 0) {
+        return `${hours}:${String(minutes).padStart(2, '0')}:${seconds}`;
+    }
+    return `${minutes}:${seconds}`;
+}
+
+function formatRelativeTime(timestamp) {
+    const diffSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+    if (diffSeconds < 60) return 'Watched just now';
+    if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)} min ago`;
+    if (diffSeconds < 86400) return `${Math.floor(diffSeconds / 3600)} hr ago`;
+    return `${Math.floor(diffSeconds / 86400)} days ago`;
 }
 
 /**
@@ -417,6 +441,9 @@ function initVideoDurations() {
                         updateDurationDisplay(el, info.duration_formatted);
                         // 缓存1小时
                         localStorage.setItem(`video_duration_${videoId}`, info.duration_formatted);
+                        if (info.duration) {
+                            localStorage.setItem(`video_duration_seconds_${videoId}`, info.duration);
+                        }
                         localStorage.setItem(`video_duration_${videoId}_time`, Date.now().toString());
                     }
                 } catch (err) {
@@ -468,6 +495,12 @@ function initPlayer() {
     if (savedPosition) {
         video.currentTime = parseFloat(savedPosition);
     }
+
+    video.addEventListener('loadedmetadata', function() {
+        if (video.duration && Number.isFinite(video.duration)) {
+            localStorage.setItem(`video_duration_seconds_${video.dataset.videoId}`, video.duration);
+        }
+    });
     
     // 定期保存播放位置
     let saveTimeout;
@@ -475,12 +508,14 @@ function initPlayer() {
         clearTimeout(saveTimeout);
         saveTimeout = setTimeout(() => {
             localStorage.setItem(`video_pos_${video.dataset.videoId}`, video.currentTime);
+            localStorage.setItem(`video_pos_${video.dataset.videoId}_updated_at`, Date.now().toString());
         }, 1000);
     });
     
     // 视频结束清除保存的位置
     video.addEventListener('ended', function() {
         localStorage.removeItem(`video_pos_${video.dataset.videoId}`);
+        localStorage.removeItem(`video_pos_${video.dataset.videoId}_updated_at`);
     });
     
     // 移动端全屏按钮点击事件
@@ -783,6 +818,7 @@ function cleanExpiredCache() {
                 // 删除过期的缓存
                 const cacheKey = key.replace('_time', '');
                 localStorage.removeItem(cacheKey);
+                localStorage.removeItem(cacheKey.replace('video_duration_', 'video_duration_seconds_'));
                 localStorage.removeItem(key);
             }
         }
