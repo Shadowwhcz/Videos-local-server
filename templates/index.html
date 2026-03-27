@@ -197,6 +197,12 @@
             </div>
             {% if current_browse and current_path %}
             <div class="directory-navigation-actions">
+                {% if browse_result and browse_result.parent_path %}
+                <a class="directory-jump-link" href="/?browse={{ current_browse | urlencode }}&dir_path={{ browse_result.parent_path | urlencode }}">
+                    <i class="bi bi-arrow-90deg-left"></i>
+                    Back to Parent Folder
+                </a>
+                {% endif %}
                 <a class="directory-jump-link" href="/?browse={{ current_browse | urlencode }}">
                     <i class="bi bi-arrow-up-left-circle"></i>
                     Back to Folder Root

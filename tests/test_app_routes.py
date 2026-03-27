@@ -27,6 +27,13 @@ def test_index_renders_directory_browser_rows(client: AppClient):
     assert "Back to Folder Root" in response.text
 
 
+def test_index_renders_back_to_parent_folder_for_nested_directory(client: AppClient):
+    response = client.get("/?browse=/library&dir_path=Season%201/Arc%20One")
+    assert response.status_code == 200
+    assert "Back to Parent Folder" in response.text
+    assert "dir_path=Season%201" in response.text
+
+
 def test_index_renders_library_insights_and_refresh_actions(client: AppClient):
     response = client.get("/")
     assert response.status_code == 200

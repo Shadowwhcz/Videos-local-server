@@ -69,8 +69,8 @@ def client(tmp_path, monkeypatch):
             "id": "video-3",
             "name": "Episode 3.mp4",
             "path": str(media_files["video-3"]),
-            "rel_path": "Season 1/Episode 3.mp4",
-            "parent_dir": "Season 1",
+            "rel_path": "Season 1/Arc One/Episode 3.mp4",
+            "parent_dir": "Season 1/Arc One",
             "size": media_files["video-3"].stat().st_size,
             "size_mb": 0.1,
             "modified": "2026-03-25 20:45",
@@ -92,15 +92,25 @@ def client(tmp_path, monkeypatch):
         if str(base_dir) != library_root:
             return {"error": "目录不存在"}
 
+        if dir_path == "Season 1/Arc One":
+            return {
+                "current_path": dir_path,
+                "parent_path": "Season 1",
+                "folders": [],
+                "videos": [fake_videos[2]],
+            }
+
         if dir_path == "Season 1":
             return {
                 "current_path": dir_path,
-                "folders": [],
-                "videos": fake_videos[1:],
+                "parent_path": "",
+                "folders": [{"name": "Arc One", "path": "Season 1/Arc One"}],
+                "videos": [fake_videos[1]],
             }
 
         return {
             "current_path": dir_path,
+            "parent_path": None,
             "folders": [{"name": "Season 1", "path": "Season 1"}],
             "videos": fake_videos,
         }
