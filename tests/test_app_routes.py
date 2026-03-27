@@ -7,6 +7,8 @@ def test_index_renders_video_library_shell(client: AppClient):
     assert "media-library-shell" in response.text
     assert "Sample Feature.mp4" in response.text
     assert "Library" in response.text
+    assert "Library Root" in response.text
+    assert "Ready to Stream" in response.text
     assert "ConnectHub" not in response.text
 
 

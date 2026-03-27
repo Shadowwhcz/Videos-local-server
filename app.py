@@ -401,6 +401,8 @@ async def index(
         video_data = dict(video)
         if not video_data.get("poster_url"):
             video_data["poster_url"] = f"/api/video/thumbnail/{video_data['id']}"
+        video_data["display_folder"] = video_data.get("parent_dir") or "Library Root"
+        video_data["stream_state_label"] = "Ready to Stream"
         return video_data
 
     per_page = video_server.videos_per_page

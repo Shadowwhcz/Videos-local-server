@@ -321,9 +321,12 @@
                         </div>
                         <div class="video-info cyber-video-info">
                             <div class="video-title" title="{{ video.name }}">{{ video.name }}</div>
-                            <div class="video-folder" title="{{ video.parent_dir or video.rel_path }}">
+                            <div class="video-folder" title="{{ video.display_folder }}">
                                 <i class="bi bi-folder2"></i>
-                                {{ video.parent_dir or video.rel_path }}
+                                {{ video.display_folder }}
+                            </div>
+                            <div class="video-lane-state">
+                                <span class="video-lane-chip">{{ video.stream_state_label }}</span>
                             </div>
                             <div class="video-meta">
                                 <span class="video-duration" data-video-id="{{ video.id }}">

@@ -3177,6 +3177,23 @@ footer small {
     margin-top: 0.55rem;
 }
 
+.video-lane-state {
+    margin-top: 0.7rem;
+}
+
+.video-lane-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.32rem 0.65rem;
+    border-radius: 999px;
+    background: rgba(129, 236, 255, 0.12);
+    color: #dff4ff;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
 .cyber-video-info .video-meta {
     margin-top: 0.9rem;
     color: #9eacc0;
