@@ -24,6 +24,7 @@ def test_index_renders_directory_browser_rows(client: AppClient):
     assert "Directory Browser" in response.text
     assert "Episode 2.mp4" in response.text
     assert "Season 1" in response.text
+    assert "Back to Folder Root" in response.text
 
 
 def test_index_renders_library_insights_and_refresh_actions(client: AppClient):

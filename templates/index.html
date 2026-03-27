@@ -195,6 +195,14 @@
                     {% endfor %}
                 </div>
             </div>
+            {% if current_browse and current_path %}
+            <div class="directory-navigation-actions">
+                <a class="directory-jump-link" href="/?browse={{ current_browse | urlencode }}">
+                    <i class="bi bi-arrow-up-left-circle"></i>
+                    Back to Folder Root
+                </a>
+            </div>
+            {% endif %}
             <div class="directory-breadcrumbs">
                 <a href="/"><i class="bi bi-house-door"></i>首页</a>
                 {% if current_browse %}
