@@ -801,7 +801,10 @@ function showDeleteConfirm(videoId, videoName, buttonEl) {
         
         try {
             const response = await fetch(`/api/video/${videoId}`, {
-                method: 'DELETE'
+                method: 'DELETE',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'  // CSRF 保护
+                }
             });
             
             const result = await response.json();

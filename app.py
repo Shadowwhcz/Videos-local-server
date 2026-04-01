@@ -9,6 +9,8 @@ import mimetypes
 import json
 import subprocess
 import hashlib
+import logging
+import sys
 from datetime import datetime, timedelta
 from urllib.parse import unquote
 import threading
@@ -20,6 +22,9 @@ import asyncio
 from functools import lru_cache
 from collections import OrderedDict
 import io
+import hmac
+import base64
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Query, HTTPException, Depends, Form, BackgroundTasks, Body
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, Response, RedirectResponse, JSONResponse
@@ -28,15 +33,73 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
 
+# ==================== 日志配置 ====================
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger("video-server")
+
+# ==================== 安全配置 ====================
+# 密码哈希相关
+try:
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    HAS_BCRYPT = True
+except ImportError:
+    HAS_BCRYPT = False
+    logger.warning("passlib 未安装，密码将以明文比较（不推荐）")
+
 # ==================== 性能优化配置 ====================
 # 流媒体优化参数（针对外接硬盘优化）
 STREAM_CHUNK_SIZE = 4 * 1024 * 1024  # 4MB 基础块大小（从1MB增加）
 STREAM_PREFETCH_SIZE = 16 * 1024 * 1024  # 16MB 预读缓冲区
 FILE_HANDLE_CACHE_SIZE = 32  # 缓存的文件句柄数量
-FILE_HANDLE_TTL = 300  # 文件句柄缓存时间（秒）
+FILE_HANDLE_TTL = 60  # 文件句柄缓存时间（秒）- 减少以避免文件变化后读取旧数据
+
+# 文件句柄缓存（全局变量，在 lifespan 中清理）
+file_handle_cache = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    global file_handle_cache
+    # 启动时初始化
+    file_handle_cache = FileHandleCache()
+    logger.info("应用启动完成")
+    yield
+    # 关闭时清理
+    logger.info("关闭文件句柄缓存...")
+    if file_handle_cache:
+        file_handle_cache.close_all()
+    logger.info("清理完成")
 
 # 初始化应用
-app = FastAPI(title="局域网视频服务器")
+app = FastAPI(title="局域网视频服务器", lifespan=lifespan)
+
+# 全局异常处理器
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """全局异常处理"""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "服务器内部错误，请稍后重试"}
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """HTTP异常处理"""
+    if exc.status_code == 302:
+        # 重定向异常
+        return RedirectResponse(url=exc.headers.get("Location", "/"), status_code=302)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail}
+    )
 
 # 读取配置以获取 secret_key
 _config = configparser.ConfigParser()
@@ -58,17 +121,41 @@ class UserSession:
     last_active: float
     device_info: str = ""
     remember_me: bool = False  # 是否记住登录
+    
+    def to_dict(self) -> dict:
+        """转换为字典（用于JSON序列化）"""
+        return {
+            "session_id": self.session_id,
+            "username": self.username,
+            "created_at": self.created_at,
+            "last_active": self.last_active,
+            "device_info": self.device_info,
+            "remember_me": self.remember_me
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'UserSession':
+        """从字典创建"""
+        return cls(
+            session_id=data["session_id"],
+            username=data["username"],
+            created_at=data["created_at"],
+            last_active=data["last_active"],
+            device_info=data.get("device_info", ""),
+            remember_me=data.get("remember_me", False)
+        )
 
 class SessionManager:
-    """服务端 Session 管理器（文件存储，支持多worker）"""
+    """服务端 Session 管理器（JSON文件存储，安全且支持多worker）"""
     
-    def __init__(self, session_expire_hours: int = 24 * 7, remember_days: int = 30, storage_dir: Path = None):
+    def __init__(self, session_expire_hours: int = 24 * 7, remember_days: int = 30, storage_dir: Path = None, secret_key: str = None):
         self.sessions: Dict[str, UserSession] = {}  # 内存缓存
         self.user_sessions: Dict[str, List[str]] = {}  # 内存缓存
         self.lock = threading.RLock()
         self.expire_hours = session_expire_hours
         self.remember_hours = remember_days * 24  # 记住登录30天
         self._storage_dir = storage_dir  # 延迟初始化
+        self.secret_key = secret_key or secrets.token_hex(32)  # 用于签名
     
     @property
     def storage_dir(self) -> Path:
@@ -82,27 +169,51 @@ class SessionManager:
     
     def _get_session_file(self, session_id: str) -> Path:
         """获取session文件路径"""
-        return self.storage_dir / f"{session_id}.session"
+        return self.storage_dir / f"{session_id}.json"
+    
+    def _sign_data(self, data: str) -> str:
+        """签名数据"""
+        return hmac.new(
+            self.secret_key.encode(),
+            data.encode(),
+            hashlib.sha256
+        ).hexdigest()
+    
+    def _verify_signature(self, data: str, signature: str) -> bool:
+        """验证签名"""
+        expected = self._sign_data(data)
+        return hmac.compare_digest(expected, signature)
     
     def _load_session(self, session_id: str) -> Optional[UserSession]:
-        """从文件加载session"""
+        """从文件加载session（JSON格式，带签名验证）"""
         try:
             file_path = self._get_session_file(session_id)
             if file_path.exists():
-                with open(file_path, 'rb') as f:
-                    return pickle.load(f)
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                # 验证签名
+                signature = data.pop("_signature", None)
+                if signature and self._verify_signature(json.dumps(data, sort_keys=True), signature):
+                    return UserSession.from_dict(data)
+                else:
+                    logger.warning(f"Session 签名验证失败: {session_id[:8]}...")
+                    return None
         except Exception as e:
-            print(f"加载session文件失败: {e}")
+            logger.error(f"加载session文件失败: {e}")
         return None
     
     def _save_session(self, session: UserSession):
-        """保存session到文件"""
+        """保存session到文件（JSON格式，带签名）"""
         try:
             file_path = self._get_session_file(session.session_id)
-            with open(file_path, 'wb') as f:
-                pickle.dump(session, f)
+            data = session.to_dict()
+            # 添加签名
+            data["_signature"] = self._sign_data(json.dumps(data, sort_keys=True))
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"保存session文件失败: {e}")
+            logger.error(f"保存session文件失败: {e}")
     
     def _delete_session_file(self, session_id: str):
         """删除session文件"""
@@ -111,7 +222,7 @@ class SessionManager:
             if file_path.exists():
                 file_path.unlink()
         except Exception as e:
-            print(f"删除session文件失败: {e}")
+            logger.error(f"删除session文件失败: {e}")
     
     def create_session(self, username: str, device_info: str = "", remember_me: bool = False) -> str:
         """创建新会话，返回 session_id"""
@@ -212,19 +323,26 @@ class SessionManager:
         
         # 扫描文件目录
         try:
-            for file_path in self.storage_dir.glob("*.session"):
+            for file_path in self.storage_dir.glob("*.json"):
                 try:
-                    with open(file_path, 'rb') as f:
-                        session = pickle.load(f)
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
                     
-                    expire_hours = self.remember_hours if session.remember_me else self.expire_hours
-                    if now - session.last_active > expire_hours * 3600:
-                        expired.append(session.session_id)
+                    # 验证签名
+                    signature = data.pop("_signature", None)
+                    if not signature or not self._verify_signature(json.dumps(data, sort_keys=True), signature):
+                        # 签名无效，直接删除
+                        expired.append(file_path.stem)
+                        continue
+                    
+                    expire_hours = self.remember_hours if data.get("remember_me") else self.expire_hours
+                    if now - data.get("last_active", 0) > expire_hours * 3600:
+                        expired.append(data["session_id"])
                 except:
                     # 损坏的文件直接删除
                     expired.append(file_path.stem)
         except Exception as e:
-            print(f"扫描session文件失败: {e}")
+            logger.error(f"扫描session文件失败: {e}")
         
         for sid in expired:
             self.delete_session(sid)
@@ -509,8 +627,8 @@ class FileHandleCache:
                     pass
             self.cache.clear()
 
-# 全局文件句柄缓存
-file_handle_cache = FileHandleCache()
+# 全局文件句柄缓存（在 lifespan 中初始化）
+# file_handle_cache 在应用启动时由 lifespan 函数初始化
 
 # ==================== 预读缓冲区 ====================
 class PrefetchBuffer:
@@ -631,8 +749,17 @@ class VideoServer:
         # 认证配置
         self.auth_enabled = self.config.getboolean('auth', 'enabled', fallback=False)
         self.auth_username = self.config.get('auth', 'username', fallback='admin')
-        self.auth_password = self.config.get('auth', 'password', fallback='hx123456')
+        self._auth_password = self.config.get('auth', 'password', fallback='hx123456')
         self.secret_key = self.config.get('auth', 'secret_key', fallback='videoserver-secret-key-change-in-production')
+        
+        # 密码哈希处理
+        self._password_hash = None
+        if HAS_BCRYPT and not self._is_hashed(self._auth_password):
+            # 如果密码不是哈希值，生成哈希
+            self._password_hash = pwd_context.hash(self._auth_password)
+            logger.info("密码已自动转换为 bcrypt 哈希存储")
+        else:
+            self._password_hash = self._auth_password
         
         # 视频目录
         dirs_str = self.config.get('video', 'directories', fallback='~/Movies')
@@ -662,6 +789,24 @@ class VideoServer:
         
         # UI配置
         self.videos_per_page = self.config.getint('ui', 'videos_per_page', fallback=30)
+    
+    def _is_hashed(self, password: str) -> bool:
+        """检查密码是否已经是哈希值"""
+        if HAS_BCRYPT:
+            return password.startswith('$2b$') or password.startswith('$2a$')
+        return False
+    
+    def verify_password(self, plain_password: str) -> bool:
+        """验证密码"""
+        if HAS_BCRYPT:
+            try:
+                return pwd_context.verify(plain_password, self._password_hash)
+            except Exception as e:
+                logger.error(f"密码验证失败: {e}")
+                return False
+        else:
+            # 降级为明文比较
+            return plain_password == self._auth_password
     
     def get_directories(self) -> List[dict]:
         """获取配置的视频目录列表"""
@@ -983,12 +1128,12 @@ class VideoServer:
                     BACKGROUND_SCAN_STATUS["running"] = False
                     BACKGROUND_SCAN_STATUS["completed_at"] = time.time()
                     BACKGROUND_SCAN_STATUS["total"] = len(videos)
-                    print(f"✅ 后台扫描完成，共 {len(videos)} 个视频")
+                    logger.info(f"后台扫描完成，共 {len(videos)} 个视频")
             except Exception as e:
                 with BACKGROUND_SCAN_LOCK:
                     BACKGROUND_SCAN_STATUS["running"] = False
                     BACKGROUND_SCAN_STATUS["error"] = str(e)
-                    print(f"❌ 后台扫描失败: {e}")
+                    logger.error(f"后台扫描失败: {e}")
         
         BACKGROUND_SCAN_THREAD = threading.Thread(target=_background_scan, daemon=True)
         BACKGROUND_SCAN_THREAD.start()
@@ -1171,7 +1316,7 @@ async def login(
     """处理登录"""
     remember_me = remember == "on"  # 复选框选中时值为 "on"
     
-    if username == video_server.auth_username and password == video_server.auth_password:
+    if username == video_server.auth_username and video_server.verify_password(password):
         # 获取设备信息（User-Agent）
         device_info = request.headers.get("user-agent", "Unknown")[:200]
         
@@ -1182,13 +1327,13 @@ async def login(
         request.session["session_id"] = session_id
         
         expire_desc = "30天" if remember_me else "7天"
-        print(f"✅ 用户 {username} 登录成功（记住我: {remember_me}，有效期: {expire_desc}），当前活跃会话数: {session_manager.get_user_session_count(username)}")
+        logger.info(f"用户 {username} 登录成功（记住我: {remember_me}，有效期: {expire_desc}），当前活跃会话数: {session_manager.get_user_session_count(username)}")
         
         # 创建响应并设置cookie
         response = RedirectResponse(url="/", status_code=302)
         return response
     
-    print(f"❌ 登录失败: 用户名={username}")
+    logger.warning(f"登录失败: 用户名={username}")
     return templates.TemplateResponse(
         "login.html",
         {"request": request, "error": "用户名或密码错误"}
@@ -1204,7 +1349,7 @@ async def logout(request: Request):
         if session:
             username = session.username
             session_manager.delete_session(session_id)
-            print(f"👋 用户 {username} 登出，剩余活跃会话数: {session_manager.get_user_session_count(username)}")
+            logger.info(f"用户 {username} 登出，剩余活跃会话数: {session_manager.get_user_session_count(username)}")
     
     request.session.clear()
     return RedirectResponse(url="/login", status_code=302)
@@ -1495,7 +1640,7 @@ async def stream_video(video_id: str, request: Request):
                     file_handle_cache.put(video_path, f)
                     
             except Exception as e:
-                print(f"Stream error: {e}")
+                logger.error(f"Stream error (range): {e}")
                 # 出错时确保关闭文件
                 try:
                     if 'f' in locals() and f:
@@ -1535,7 +1680,7 @@ async def stream_video(video_id: str, request: Request):
                     file_handle_cache.put(video_path, f)
                     
             except Exception as e:
-                print(f"Stream error: {e}")
+                logger.error(f"Stream error (full): {e}")
                 try:
                     if 'f' in locals() and f:
                         f.close()
@@ -1692,14 +1837,6 @@ async def api_start_scan():
         "started": result,
         "status": video_server.get_scan_status()
     }
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """应用关闭时清理资源"""
-    print("🔄 关闭文件句柄缓存...")
-    file_handle_cache.close_all()
-    print("✅ 清理完成")
 
 
 @app.get("/api/session/status")
@@ -1995,10 +2132,22 @@ async def get_integrity_status(video_ids: str = Query(default="")):
 
 @app.delete("/api/video/{video_id}")
 async def delete_video(video_id: str, request: Request):
-    """API: 删除视频文件"""
+    """API: 删除视频文件
+    
+    安全措施:
+    1. 需要登录认证
+    2. 需要 X-Requested-With 头（CSRF 保护）
+    3. 验证文件路径在允许的目录内
+    """
     # 需要登录才能删除
     if video_server.auth_enabled and not get_current_user(request):
         raise HTTPException(status_code=401, detail="未登录，无法删除")
+    
+    # CSRF 保护：检查自定义头
+    x_requested_with = request.headers.get("X-Requested-With")
+    if x_requested_with != "XMLHttpRequest":
+        logger.warning(f"CSRF 检测：删除请求缺少 X-Requested-With 头")
+        raise HTTPException(status_code=403, detail="请求被拒绝（CSRF 保护）")
     
     video_path = video_server.get_video_path(video_id)
     if not video_path:
@@ -2015,6 +2164,7 @@ async def delete_video(video_id: str, request: Request):
             break
     
     if not is_valid_path:
+        logger.warning(f"非法路径访问尝试: {video_path}")
         raise HTTPException(status_code=403, detail="无权删除此文件")
     
     try:
@@ -2031,8 +2181,10 @@ async def delete_video(video_id: str, request: Request):
         with CACHE_LOCK:
             VIDEO_INTEGRITY_CACHE.pop(video_id, None)
         
+        logger.info(f"已删除视频: {os.path.basename(video_path)}")
         return {"success": True, "message": f"已删除: {os.path.basename(video_path)}"}
     except Exception as e:
+        logger.error(f"删除视频失败: {e}")
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
 
@@ -2050,7 +2202,7 @@ async def favicon():
 
 def main():
     """启动服务器"""
-    print(f"""
+    logger.info(f"""
 ╔═══════════════════════════════════════════════════════════╗
 ║          🎬 局域网视频服务器                              ║
 ╠═══════════════════════════════════════════════════════════╣
