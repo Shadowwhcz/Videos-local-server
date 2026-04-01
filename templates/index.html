@@ -312,9 +312,40 @@
         
         {% endif %}
         
-        <!-- Pagination -->
-        {% if total_pages and total_pages > 1 %}
-        <nav class="pagination-wrapper">
+        <!-- Infinite Scroll Loader -->
+        {% if videos and not browse_result %}
+        <div class="infinite-scroll-loader" id="infiniteScrollLoader" 
+             data-total="{{ total }}" 
+             data-page="{{ page }}"
+             data-search="{{ search }}"
+             style="display: none;">
+            <div class="loading-more">
+                <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                <span>加载更多视频...</span>
+            </div>
+        </div>
+        
+        <!-- Load More Button (fallback for non-scroll users) -->
+        {% if total > page * 30 %}
+        <div class="load-more-wrapper" id="loadMoreWrapper">
+            <button class="btn btn-outline-primary load-more-btn" id="loadMoreBtn">
+                <i class="bi bi-arrow-down-circle me-1"></i>
+                加载更多视频
+                <small class="text-muted ms-1">（还有 {{ total - page * 30 }} 个）</small>
+            </button>
+        </div>
+        {% endif %}
+        
+        <!-- End of List -->
+        <div class="end-of-list" id="endOfList" style="display: none;">
+            <i class="bi bi-check-circle me-1"></i>
+            <span>已加载全部 {{ total }} 个视频</span>
+        </div>
+        {% endif %}
+        
+        <!-- Pagination (hidden, kept for reference) -->
+        <nav class="pagination-wrapper" id="paginationWrapper" style="display: none;">
+            {% if total_pages and total_pages > 1 %}
             <ul class="pagination">
                 {% if page > 1 %}
                 <li class="page-item">
@@ -356,8 +387,8 @@
                 </li>
                 {% endif %}
             </ul>
+            {% endif %}
         </nav>
-        {% endif %}
     </main>
     
     <!-- Footer -->

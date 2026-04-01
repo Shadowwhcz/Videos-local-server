@@ -12,6 +12,18 @@ let pendingVideos = [];
 let pollInterval = null;
 let loadingCheckInterval = null;  // loading状态检查
 
+// ==================== 无限滚动状态 ====================
+let infiniteScrollConfig = {
+    currentPage: 1,
+    totalVideos: 0,
+    search: '',
+    isLoading: false,
+    hasMore: true,
+    perPage: 50
+};
+
+let infiniteScrollObserver = null;
+
 // ==================== 性能优化配置 ====================
 const BATCH_DELAY = 100;        // 批量请求延迟(ms)
 const MAX_CONCURRENT = 3;       // 最大并发请求数
@@ -63,6 +75,9 @@ document.addEventListener('DOMContentLoaded', function() {
         initThumbnails();
         initPlayer();
         initDeleteButtons();
+        
+        // 初始化无限滚动
+        initInfiniteScroll();
         
         // 延迟加载非关键功能
         setTimeout(() => {
@@ -1161,3 +1176,332 @@ function initIntegrityCheck() {
 
 // 页面卸载时停止轮询
 window.addEventListener('beforeunload', stopPolling);
+
+// ==================== 无限滚动加载 ====================
+
+/**
+ * 初始化无限滚动
+ */
+function initInfiniteScroll() {
+    const videoGrid = document.querySelector('.video-grid');
+    const loadMoreBtn = document.getElementById('loadMoreBtn');
+    const loaderData = document.getElementById('infiniteScrollLoader');
+    
+    // 只在视频列表页面启用（不在浏览目录页面）
+    if (!videoGrid || document.querySelector('.browse_result')) return;
+    
+    // 初始化配置
+    if (loaderData) {
+        infiniteScrollConfig.totalVideos = parseInt(loaderData.dataset.total) || 0;
+        infiniteScrollConfig.currentPage = parseInt(loaderData.dataset.page) || 1;
+        infiniteScrollConfig.search = loaderData.dataset.search || '';
+        infiniteScrollConfig.perPage = 30; // 与后端默认分页一致
+        
+        // 检查是否还有更多
+        infiniteScrollConfig.hasMore = infiniteScrollConfig.totalVideos > infiniteScrollConfig.currentPage * infiniteScrollConfig.perPage;
+    }
+    
+    // 加载更多按钮
+    if (loadMoreBtn) {
+        loadMoreBtn.addEventListener('click', loadMoreVideos);
+    }
+    
+    // 使用 IntersectionObserver 实现滚动加载
+    if ('IntersectionObserver' in window) {
+        const sentinel = document.createElement('div');
+        sentinel.id = 'scrollSentinel';
+        sentinel.className = 'scroll-sentinel';
+        videoGrid.parentNode.appendChild(sentinel);
+        
+        infiniteScrollObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting && !infiniteScrollConfig.isLoading && infiniteScrollConfig.hasMore) {
+                    loadMoreVideos();
+                }
+            });
+        }, {
+            rootMargin: '200px',
+            threshold: 0.1
+        });
+        
+        infiniteScrollObserver.observe(sentinel);
+    }
+    
+    // 更新统计显示
+    updateStatsDisplay();
+}
+
+/**
+ * 加载更多视频
+ */
+async function loadMoreVideos() {
+    if (infiniteScrollConfig.isLoading || !infiniteScrollConfig.hasMore) return;
+    
+    infiniteScrollConfig.isLoading = true;
+    
+    const loader = document.getElementById('infiniteScrollLoader');
+    const loadMoreBtn = document.getElementById('loadMoreBtn');
+    const videoGrid = document.querySelector('.video-grid');
+    
+    // 显示加载状态
+    if (loader) loader.style.display = 'block';
+    if (loadMoreBtn) {
+        loadMoreBtn.disabled = true;
+        loadMoreBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>加载中...';
+    }
+    
+    try {
+        const nextPage = infiniteScrollConfig.currentPage + 1;
+        const url = `/api/videos?page=${nextPage}&limit=${infiniteScrollConfig.perPage}`;
+        if (infiniteScrollConfig.search) {
+            url += `&search=${encodeURIComponent(infiniteScrollConfig.search)}`;
+        }
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('加载失败');
+        
+        const data = await response.json();
+        
+        if (data.videos && data.videos.length > 0) {
+            // 添加新视频到网格
+            const newCards = data.videos.map(video => createVideoCard(video));
+            newCards.forEach(card => videoGrid.appendChild(card));
+            
+            // 更新状态
+            infiniteScrollConfig.currentPage = nextPage;
+            infiniteScrollConfig.hasMore = data.has_more;
+            
+            // 初始化新添加的元素
+            initNewVideoCards(newCards);
+            
+            // 更新统计
+            updateStatsDisplay();
+            
+            // 检查完整性
+            const newVideoIds = data.videos.map(v => v.id);
+            batchCheckVideoStatus(newVideoIds);
+        }
+        
+        // 没有更多了
+        if (!infiniteScrollConfig.hasMore) {
+            showEndOfList();
+        }
+        
+    } catch (err) {
+        console.log('加载更多失败:', err);
+        showToast('加载失败，请稍后重试');
+    } finally {
+        infiniteScrollConfig.isLoading = false;
+        
+        // 隐藏加载状态
+        if (loader) loader.style.display = 'none';
+        if (loadMoreBtn && infiniteScrollConfig.hasMore) {
+            loadMoreBtn.disabled = false;
+            const remaining = infiniteScrollConfig.totalVideos - infiniteScrollConfig.currentPage * infiniteScrollConfig.perPage;
+            loadMoreBtn.innerHTML = `
+                <i class="bi bi-arrow-down-circle me-1"></i>
+                加载更多视频
+                <small class="text-muted ms-1">（还有 ${remaining > 0 ? remaining : 0} 个）</small>
+            `;
+        } else if (loadMoreBtn) {
+            loadMoreBtn.style.display = 'none';
+        }
+    }
+}
+
+/**
+ * 创建视频卡片元素
+ */
+function createVideoCard(video) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'video-card-wrapper';
+    wrapper.dataset.videoId = video.id;
+    wrapper.dataset.videoName = video.name;
+    
+    wrapper.innerHTML = `
+        <a href="/play/${video.id}" class="video-card">
+            <div class="video-thumb">
+                <img class="video-thumbnail" 
+                     data-src="/api/video/thumbnail/${video.id}" 
+                     src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect fill='%231a1a2e' width='16' height='9'/%3E%3C/svg%3E"
+                     alt="${video.name}"
+                     loading="lazy">
+                <div class="thumb-placeholder">
+                    <i class="bi bi-play-circle"></i>
+                </div>
+                <div class="play-overlay">
+                    <div class="play-btn">
+                        <i class="bi bi-play-fill"></i>
+                    </div>
+                </div>
+                <div class="video-preview" data-src="/stream/${video.id}">
+                    <video muted preload="metadata"></video>
+                </div>
+                <div class="corrupted-warning" style="display: none;" title="视频文件可能已损坏">
+                    <i class="bi bi-exclamation-triangle-fill"></i>
+                </div>
+            </div>
+            <div class="video-info">
+                <div class="video-title" title="${video.name}">${video.name}</div>
+                ${video.parent_dir ? `<div class="video-folder" title="${video.parent_dir}"><i class="bi bi-folder2"></i> ${video.parent_dir}</div>` : ''}
+                <div class="video-meta">
+                    <span class="ext-badge">${video.ext}</span>
+                    <span class="video-duration" data-video-id="${video.id}">
+                        <i class="bi bi-clock"></i> <span class="duration-text">--:--</span>
+                    </span>
+                    <span><i class="bi bi-hdd"></i> ${video.size_mb} MB</span>
+                </div>
+            </div>
+        </a>
+        <button class="video-delete-btn" title="删除视频" data-video-id="${video.id}" data-video-name="${video.name}">
+            <i class="bi bi-trash3"></i>
+        </button>
+    `;
+    
+    return wrapper;
+}
+
+/**
+ * 初始化新添加的视频卡片
+ */
+function initNewVideoCards(cards) {
+    cards.forEach(wrapper => {
+        const card = wrapper.querySelector('.video-card');
+        
+        // 点击事件
+        card.addEventListener('click', function(e) {
+            if (wrapper.classList.contains('downloading')) {
+                e.preventDefault();
+                showDownloadingAlert(wrapper.dataset.videoName, wrapper.dataset.downloadReason);
+                return false;
+            }
+            if (wrapper.classList.contains('corrupted')) {
+                e.preventDefault();
+                showCorruptedAlert(wrapper.dataset.videoName);
+                return false;
+            }
+        });
+        
+        // 缩略图懒加载
+        const img = wrapper.querySelector('.video-thumbnail');
+        if (img && img.dataset.src) {
+            img.src = img.dataset.src;
+            img.onload = () => img.classList.add('loaded');
+        }
+        
+        // 删除按钮
+        const deleteBtn = wrapper.querySelector('.video-delete-btn');
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', async function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                showDeleteConfirm(this.dataset.videoId, this.dataset.videoName, this);
+            });
+        }
+        
+        // 视频预览
+        initSingleVideoPreview(wrapper);
+    });
+}
+
+/**
+ * 初始化单个视频预览
+ */
+function initSingleVideoPreview(wrapper) {
+    const card = wrapper.querySelector('.video-card');
+    const previewContainer = card?.querySelector('.video-preview');
+    const video = previewContainer?.querySelector('video');
+    const thumbnail = card?.querySelector('.video-thumbnail');
+    
+    if (!previewContainer || !video) return;
+    if (wrapper.classList.contains('corrupted')) return;
+    
+    let loaded = false;
+    
+    card.addEventListener('mouseenter', () => {
+        if (!loaded) {
+            const src = previewContainer.dataset.src;
+            if (src) {
+                video.src = src + '#t=3';
+                video.load();
+                loaded = true;
+            }
+        }
+    });
+    
+    let hoverTimeout;
+    card.addEventListener('mouseenter', () => {
+        hoverTimeout = setTimeout(() => {
+            if (video.readyState >= 2) {
+                video.play().catch(() => {});
+                thumbnail?.classList.add('preview-active');
+            }
+        }, 800);
+    });
+    
+    card.addEventListener('mouseleave', () => {
+        clearTimeout(hoverTimeout);
+        video.pause();
+        video.currentTime = 3;
+        thumbnail?.classList.remove('preview-active');
+    });
+}
+
+/**
+ * 更新统计显示
+ */
+function updateStatsDisplay() {
+    const statsBar = document.querySelector('.stats-bar');
+    if (!statsBar) return;
+    
+    const loadedCount = document.querySelectorAll('.video-card-wrapper').length;
+    const total = infiniteScrollConfig.totalVideos;
+    
+    const items = statsBar.querySelectorAll('.stat-item');
+    if (items[0]) {
+        items[0].innerHTML = `
+            <i class="bi bi-collection-play"></i>
+            <span>共 <strong>${total}</strong> 个视频（已加载 <strong>${loadedCount}</strong>）</span>
+        `;
+    }
+}
+
+/**
+ * 显示列表结束提示
+ */
+function showEndOfList() {
+    const endOfList = document.getElementById('endOfList');
+    const loadMoreWrapper = document.getElementById('loadMoreWrapper');
+    
+    if (endOfList) {
+        endOfList.style.display = 'block';
+        endOfList.innerHTML = `
+            <i class="bi bi-check-circle me-1"></i>
+            <span>已加载全部 ${infiniteScrollConfig.totalVideos} 个视频</span>
+        `;
+    }
+    
+    if (loadMoreWrapper) {
+        loadMoreWrapper.style.display = 'none';
+    }
+}
+
+/**
+ * 显示 Toast 提示
+ */
+function showToast(message) {
+    let toast = document.getElementById('errorToast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'errorToast';
+        toast.className = 'error-toast';
+        document.body.appendChild(toast);
+    }
+    
+    toast.textContent = message;
+    toast.classList.add('show');
+    
+    setTimeout(() => {
+        toast.classList.remove('show');
+    }, 3000);
+}

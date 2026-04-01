@@ -1540,12 +1540,34 @@ async def stream_video(video_id: str, request: Request):
 
 
 @app.get("/api/videos")
-async def api_videos(search: str = "", directory: str = None):
-    """API: 获取视频列表"""
-    videos = video_server.scan_videos(search, directory)
-    for v in videos:
+async def api_videos(
+    search: str = "",
+    directory: str = None,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """API: 获取视频列表（支持分页）"""
+    all_videos = video_server.scan_videos(search, directory)
+    
+    # 为所有视频生成ID
+    for v in all_videos:
         v['id'] = get_video_id(v['path'])
-    return {"videos": videos, "total": len(videos)}
+    
+    total = len(all_videos)
+    has_more = total > page * limit
+    
+    # 分页
+    start = (page - 1) * limit
+    videos = all_videos[start:start + limit]
+    
+    return {
+        "videos": videos,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "has_more": has_more,
+        "total_pages": (total + limit - 1) // limit if total > 0 else 0,
+    }
 
 
 @app.get("/api/directories")

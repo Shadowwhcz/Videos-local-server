@@ -2392,3 +2392,112 @@ footer small {
 .loading-progress .progress-bar {
     background: var(--primary-gradient);
 }
+
+/* ============================================
+   无限滚动加载
+   ============================================ */
+
+.scroll-sentinel {
+    height: 20px;
+    width: 100%;
+    clear: both;
+}
+
+.infinite-scroll-loader {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+    text-align: center;
+    min-height: 60px;
+}
+
+.loading-more {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.loading-more .spinner-border-sm {
+    width: 1rem;
+    height: 1rem;
+}
+
+.load-more-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+}
+
+.load-more-btn {
+    background: var(--glass-gradient);
+    border: 1px solid var(--border-light);
+    color: var(--text-primary);
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.95rem;
+    transition: all var(--transition-normal);
+    cursor: pointer;
+}
+
+.load-more-btn:hover:not(:disabled) {
+    background: var(--bg-card-hover);
+    border-color: var(--primary);
+    transform: translateY(-2px);
+}
+
+.load-more-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.load-more-btn small {
+    opacity: 0.7;
+}
+
+.end-of-list {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    background: var(--glass-gradient);
+    border-radius: var(--radius-md);
+    margin: 1rem 0;
+}
+
+.end-of-list i {
+    color: var(--primary-light);
+}
+
+/* Toast 提示 */
+.error-toast {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+    color: var(--text-primary);
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all var(--transition-normal);
+    box-shadow: var(--shadow-md);
+}
+
+.error-toast.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
