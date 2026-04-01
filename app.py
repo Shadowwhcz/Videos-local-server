@@ -666,17 +666,17 @@ class VideoServer:
     def get_directories(self) -> List[dict]:
         """获取配置的视频目录列表"""
         dirs = []
-        # 尝试从缓存获取视频数量
-        cache = self._load_scan_cache()
-        cached_videos = cache.get('videos', []) if cache else []
+        # 直接从内存缓存获取，避免每次都读取文件
+        with VIDEO_SCAN_CACHE_LOCK:
+            cached_videos = VIDEO_SCAN_CACHE.get('videos', [])
         
         for d in self.video_dirs:
             name = self.video_dir_names.get(d, os.path.basename(d))
-            # 从缓存计算视频数量，避免阻塞扫描
+            # 从缓存计算视频数量
             if cached_videos:
                 video_count = sum(1 for v in cached_videos if v.get('base_dir') == d)
             else:
-                video_count = 0  # 无缓存时不统计，避免阻塞
+                video_count = 0
             dirs.append({
                 'name': name,
                 'path': d,
@@ -864,9 +864,14 @@ class VideoServer:
         # 尝试使用缓存（仅当不搜索且使用全部目录时）
         if use_cache and not search and not directory:
             with VIDEO_SCAN_CACHE_LOCK:
+                # 优先使用内存缓存
+                if VIDEO_SCAN_CACHE and self._is_cache_valid(VIDEO_SCAN_CACHE, quick_check=True):
+                    return VIDEO_SCAN_CACHE.get('videos', [])
+                # 内存缓存无效，尝试从文件加载
                 cache = self._load_scan_cache()
-                # 使用快速检查模式（只检查时间过期，不遍历目录）
                 if self._is_cache_valid(cache, quick_check=True):
+                    # 更新内存缓存
+                    VIDEO_SCAN_CACHE.update(cache)
                     return cache.get('videos', [])
         
         # 检查是否有后台扫描正在运行
