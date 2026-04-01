@@ -666,9 +666,17 @@ class VideoServer:
     def get_directories(self) -> List[dict]:
         """获取配置的视频目录列表"""
         dirs = []
+        # 尝试从缓存获取视频数量
+        cache = self._load_scan_cache()
+        cached_videos = cache.get('videos', []) if cache else []
+        
         for d in self.video_dirs:
             name = self.video_dir_names.get(d, os.path.basename(d))
-            video_count = self._count_videos(d)
+            # 从缓存计算视频数量，避免阻塞扫描
+            if cached_videos:
+                video_count = sum(1 for v in cached_videos if v.get('base_dir') == d)
+            else:
+                video_count = 0  # 无缓存时不统计，避免阻塞
             dirs.append({
                 'name': name,
                 'path': d,
