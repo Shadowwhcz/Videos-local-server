@@ -1657,16 +1657,6 @@ async def api_start_scan():
         "started": result,
         "status": video_server.get_scan_status()
     }
-    """应用启动时预热缓存"""
-    print("🔄 启动后台扫描预热缓存...")
-    # 检查是否已有缓存
-    cache = video_server._load_scan_cache()
-    if video_server._is_cache_valid(cache, quick_check=True):
-        print(f"✅ 缓存有效，已有 {len(cache.get('videos', []))} 个视频")
-    else:
-        # 启动后台扫描
-        video_server.start_background_scan()
-        print("⏳ 后台扫描已启动，首次访问可能需要等待...")
 
 
 @app.on_event("shutdown")
