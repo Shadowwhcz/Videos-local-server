@@ -266,6 +266,26 @@
             {% endfor %}
         </div>
         
+        <!-- Loading State -->
+        {% elif is_loading %}
+        <div class="loading-state" id="loadingState">
+            <div class="loading-spinner">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+            <h3>正在扫描视频目录...</h3>
+            <p>首次加载需要扫描视频目录，请稍候</p>
+            <p class="loading-tip">页面将在扫描完成后自动刷新</p>
+            <div class="loading-progress">
+                <div class="progress">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                         role="progressbar" 
+                         style="width: 100%"></div>
+                </div>
+            </div>
+        </div>
+        
         <!-- Empty Directory -->
         {% elif browse_result and not browse_result.videos and not browse_result.folders %}
         <div class="empty-state">

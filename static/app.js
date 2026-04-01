@@ -10,6 +10,7 @@ let appConfig = {
 // 待检查的视频ID列表
 let pendingVideos = [];
 let pollInterval = null;
+let loadingCheckInterval = null;  // loading状态检查
 
 // ==================== 性能优化配置 ====================
 const BATCH_DELAY = 100;        // 批量请求延迟(ms)
@@ -52,6 +53,9 @@ class RequestQueue {
 const requestQueue = new RequestQueue();
 
 document.addEventListener('DOMContentLoaded', function() {
+    // 检查loading状态
+    initLoadingCheck();
+    
     // 初始化所有功能（分批加载，减少并发）
     initConfig().then(() => {
         initSearch();
@@ -76,6 +80,45 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 1500);
     });
 });
+
+/**
+ * 检查loading状态并自动刷新
+ */
+function initLoadingCheck() {
+    const loadingState = document.getElementById('loadingState');
+    if (!loadingState) return;
+    
+    // 每2秒检查扫描状态
+    loadingCheckInterval = setInterval(async () => {
+        try {
+            const response = await fetch('/api/scan/status');
+            if (!response.ok) return;
+            
+            const status = await response.json();
+            
+            // 扫描完成，刷新页面
+            if (!status.running && status.has_cache) {
+                clearInterval(loadingCheckInterval);
+                loadingState.querySelector('h3').textContent = '扫描完成！';
+                loadingState.querySelector('p').textContent = `共发现 ${status.total} 个视频`;
+                
+                // 1秒后刷新页面
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            }
+            
+            // 更新进度显示
+            if (status.running) {
+                const elapsed = status.started_at ? Math.round((Date.now() / 1000 - status.started_at) / 60) : 0;
+                loadingState.querySelector('.loading-tip').textContent = 
+                    `已扫描 ${elapsed} 分钟，请耐心等待...`;
+            }
+        } catch (err) {
+            console.log('检查扫描状态失败:', err);
+        }
+    }, 2000);
+}
 
 /**
  * 加载配置

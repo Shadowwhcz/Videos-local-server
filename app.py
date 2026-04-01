@@ -589,6 +589,19 @@ VIDEO_SCAN_CACHE: Dict[str, dict] = {}  # 结构: {"videos": [...], "scanned_at"
 VIDEO_SCAN_CACHE_LOCK = threading.Lock()
 VIDEO_SCAN_CACHE_EXPIRE_HOURS = 1  # 缓存过期时间（小时）
 
+# ==================== 后台扫描优化 ====================
+# 后台扫描线程状态
+BACKGROUND_SCAN_THREAD: Optional[threading.Thread] = None
+BACKGROUND_SCAN_STATUS: Dict[str, any] = {
+    "running": False,
+    "progress": 0,
+    "total": 0,
+    "started_at": None,
+    "completed_at": None,
+    "error": None
+}
+BACKGROUND_SCAN_LOCK = threading.Lock()
+
 # 静态文件和模板
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.mount("/thumbnails", StaticFiles(directory=THUMBNAIL_DIR), name="thumbnails")
@@ -760,7 +773,7 @@ class VideoServer:
         return False
     
     def _get_dir_mtime(self, directory: str) -> float:
-        """获取目录及其子目录的最新修改时间"""
+        """获取目录及其子目录的最新修改时间（仅在扫描时使用）"""
         max_mtime = 0
         try:
             for root, dirs, files in os.walk(directory):
@@ -781,6 +794,13 @@ class VideoServer:
             pass
         return max_mtime
     
+    def _get_top_dir_mtime(self, directory: str) -> float:
+        """获取顶层目录修改时间（快速检查，不递归）"""
+        try:
+            return os.stat(directory).st_mtime
+        except:
+            return 0
+    
     def _load_scan_cache(self) -> dict:
         """从文件加载扫描缓存"""
         try:
@@ -799,8 +819,13 @@ class VideoServer:
         except:
             pass
     
-    def _is_cache_valid(self, cache: dict) -> bool:
-        """检查缓存是否有效"""
+    def _is_cache_valid(self, cache: dict, quick_check: bool = True) -> bool:
+        """检查缓存是否有效
+        
+        Args:
+            cache: 缓存数据
+            quick_check: True时只检查时间过期（快速）；False时会检查目录修改时间（慢）
+        """
         if not cache or 'scanned_at' not in cache or 'videos' not in cache:
             return False
         
@@ -809,10 +834,14 @@ class VideoServer:
         if age_hours > VIDEO_SCAN_CACHE_EXPIRE_HOURS:
             return False
         
-        # 检查目录是否有变化
+        # 快速检查模式：只检查时间，不遍历目录
+        if quick_check:
+            return True
+        
+        # 慢速检查模式：检查顶层目录修改时间（不递归）
         cached_mtimes = cache.get('dir_mtimes', {})
         for base_dir in self.video_dirs:
-            current_mtime = self._get_dir_mtime(base_dir)
+            current_mtime = self._get_top_dir_mtime(base_dir)
             cached_mtime = cached_mtimes.get(base_dir, 0)
             if current_mtime > cached_mtime:
                 return False
@@ -828,8 +857,15 @@ class VideoServer:
         if use_cache and not search and not directory:
             with VIDEO_SCAN_CACHE_LOCK:
                 cache = self._load_scan_cache()
-                if self._is_cache_valid(cache):
+                # 使用快速检查模式（只检查时间过期，不遍历目录）
+                if self._is_cache_valid(cache, quick_check=True):
                     return cache.get('videos', [])
+        
+        # 检查是否有后台扫描正在运行
+        with BACKGROUND_SCAN_LOCK:
+            if BACKGROUND_SCAN_STATUS["running"] and use_cache and not search and not directory:
+                # 后台扫描正在进行，返回空结果让前端显示loading
+                return []
         
         # 执行扫描
         videos = []
@@ -881,7 +917,8 @@ class VideoServer:
         
         # 更新缓存（仅当不搜索且使用全部目录时）
         if use_cache and not search and not directory:
-            dir_mtimes = {d: self._get_dir_mtime(d) for d in self.video_dirs}
+            # 只获取顶层目录mtime，不递归遍历
+            dir_mtimes = {d: self._get_top_dir_mtime(d) for d in self.video_dirs}
             with VIDEO_SCAN_CACHE_LOCK:
                 cache = {
                     'videos': videos,
@@ -889,6 +926,11 @@ class VideoServer:
                     'dir_mtimes': dir_mtimes,
                 }
                 self._save_scan_cache(cache)
+                # 更新后台扫描状态
+                with BACKGROUND_SCAN_LOCK:
+                    BACKGROUND_SCAN_STATUS["running"] = False
+                    BACKGROUND_SCAN_STATUS["completed_at"] = time.time()
+                    BACKGROUND_SCAN_STATUS["total"] = len(videos)
         
         return videos
     
@@ -903,6 +945,54 @@ class VideoServer:
                     pass
         # 重新扫描
         self.scan_videos(use_cache=False)
+    
+    def start_background_scan(self):
+        """启动后台扫描线程"""
+        global BACKGROUND_SCAN_THREAD
+        
+        with BACKGROUND_SCAN_LOCK:
+            if BACKGROUND_SCAN_STATUS["running"]:
+                return False  # 已有扫描正在进行
+            
+            BACKGROUND_SCAN_STATUS["running"] = True
+            BACKGROUND_SCAN_STATUS["progress"] = 0
+            BACKGROUND_SCAN_STATUS["total"] = 0
+            BACKGROUND_SCAN_STATUS["started_at"] = time.time()
+            BACKGROUND_SCAN_STATUS["completed_at"] = None
+            BACKGROUND_SCAN_STATUS["error"] = None
+        
+        def _background_scan():
+            """后台扫描线程"""
+            try:
+                # 执行扫描
+                videos = self.scan_videos(use_cache=False, search="", directory=None)
+                with BACKGROUND_SCAN_LOCK:
+                    BACKGROUND_SCAN_STATUS["running"] = False
+                    BACKGROUND_SCAN_STATUS["completed_at"] = time.time()
+                    BACKGROUND_SCAN_STATUS["total"] = len(videos)
+                    print(f"✅ 后台扫描完成，共 {len(videos)} 个视频")
+            except Exception as e:
+                with BACKGROUND_SCAN_LOCK:
+                    BACKGROUND_SCAN_STATUS["running"] = False
+                    BACKGROUND_SCAN_STATUS["error"] = str(e)
+                    print(f"❌ 后台扫描失败: {e}")
+        
+        BACKGROUND_SCAN_THREAD = threading.Thread(target=_background_scan, daemon=True)
+        BACKGROUND_SCAN_THREAD.start()
+        return True
+    
+    def get_scan_status(self) -> dict:
+        """获取扫描状态"""
+        with BACKGROUND_SCAN_LOCK:
+            return {
+                "running": BACKGROUND_SCAN_STATUS["running"],
+                "progress": BACKGROUND_SCAN_STATUS["progress"],
+                "total": BACKGROUND_SCAN_STATUS["total"],
+                "started_at": BACKGROUND_SCAN_STATUS["started_at"],
+                "completed_at": BACKGROUND_SCAN_STATUS["completed_at"],
+                "error": BACKGROUND_SCAN_STATUS["error"],
+                "has_cache": VIDEO_SCAN_CACHE_FILE.exists(),
+            }
     
     def get_video_path(self, video_id: str) -> Optional[str]:
         """根据视频ID获取路径"""
@@ -1145,7 +1235,28 @@ async def index(
         )
     
     # 全局搜索或全部视频列表
+    # 检查扫描状态
+    scan_status = video_server.get_scan_status()
+    is_loading = scan_status["running"] and not scan_status["has_cache"]
+    
     all_videos = video_server.scan_videos(search)
+    
+    # 如果后台正在扫描且没有缓存，返回loading状态
+    if is_loading and not search and len(all_videos) == 0:
+        return templates.TemplateResponse(
+            "index.html",
+            {
+                "request": request,
+                "directories": directories,
+                "videos": [],
+                "search": search,
+                "page": 1,
+                "total_pages": 0,
+                "total": 0,
+                "is_loading": True,
+                "scan_status": scan_status,
+            }
+        )
     
     # 分页
     total = len(all_videos)
@@ -1530,6 +1641,32 @@ async def api_cache_status():
             "cache_size": len(VIDEO_SCAN_CACHE)
         }
     }
+
+
+@app.get("/api/scan/status")
+async def api_scan_status():
+    """API: 获取扫描状态"""
+    return video_server.get_scan_status()
+
+
+@app.post("/api/scan/start")
+async def api_start_scan():
+    """API: 手动启动后台扫描"""
+    result = video_server.start_background_scan()
+    return {
+        "started": result,
+        "status": video_server.get_scan_status()
+    }
+    """应用启动时预热缓存"""
+    print("🔄 启动后台扫描预热缓存...")
+    # 检查是否已有缓存
+    cache = video_server._load_scan_cache()
+    if video_server._is_cache_valid(cache, quick_check=True):
+        print(f"✅ 缓存有效，已有 {len(cache.get('videos', []))} 个视频")
+    else:
+        # 启动后台扫描
+        video_server.start_background_scan()
+        print("⏳ 后台扫描已启动，首次访问可能需要等待...")
 
 
 @app.on_event("shutdown")
