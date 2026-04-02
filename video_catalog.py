@@ -50,6 +50,10 @@ class VideoServer:
         self.secret_key = self.config.get("auth", "secret_key", fallback="videoserver-secret-key-change-in-production")
         self.thumbnail_dir = thumbnail_dir
         self.scan_cache_file = scan_cache_file
+        self.cache_dir = self.scan_cache_file.parent / ".media_cache"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.video_info_cache_file = self.cache_dir / "video_info_cache.json"
+        self.directory_listing_cache_file = self.cache_dir / "directory_listings.pkl"
         self.scan_cache_lock = threading.Lock()
         self.scan_cache_expire_hours = 1
         self.is_temp_file = is_temp_file
@@ -61,11 +65,15 @@ class VideoServer:
         self.video_meta_index_built_at = 0.0
         self.video_info_cache_lock = threading.Lock()
         self.video_info_cache: dict[str, dict] = {}
+        self.video_info_cache_loaded = False
         self.video_info_cache_ttl_seconds = 3600 * 24
         self.directories_cache_lock = threading.Lock()
         self.directories_cache: list[dict] = []
         self.directories_cache_built_at = 0.0
         self.directories_cache_ttl_seconds = 15
+        self.directory_listing_cache_lock = threading.Lock()
+        self.directory_listing_cache: dict[str, dict] = {}
+        self.directory_listing_cache_loaded = False
         self.scan_cache_memory: dict = {}
         self.scan_cache_memory_mtime: float = 0.0
         self.cache_validation_lock = threading.Lock()
@@ -171,6 +179,14 @@ class VideoServer:
 
         current_path = relative_path.strip(os.sep)
         current_prefix = f"{current_path}{os.sep}" if current_path else ""
+        scan_signature = self._get_scan_signature()
+        cache_key = f"{directory}|{current_path}"
+        if scan_signature:
+            self._ensure_directory_listing_cache_loaded()
+            with self.directory_listing_cache_lock:
+                cached_entry = self.directory_listing_cache.get(cache_key)
+                if cached_entry and cached_entry.get("scan_signature") == scan_signature:
+                    return dict(cached_entry["result"])
         base_videos = [
             dict(video)
             for video in self.scan_videos(use_cache=True)
@@ -226,12 +242,21 @@ class VideoServer:
                 }
             )
         videos.sort(key=lambda video: video["name"].lower())
-        return {
+        result = {
             "folders": folders,
             "videos": videos,
             "current_path": current_path,
             "parent_path": os.path.dirname(current_path) if current_path else None,
         }
+        if scan_signature:
+            self._ensure_directory_listing_cache_loaded()
+            with self.directory_listing_cache_lock:
+                self.directory_listing_cache[cache_key] = {
+                    "scan_signature": scan_signature,
+                    "result": result,
+                }
+            self._persist_directory_listing_cache()
+        return result
 
     def _summarize_folder(self, directory: str) -> tuple[int, int]:
         subfolder_count = 0
@@ -315,6 +340,57 @@ class VideoServer:
             self.scan_cache_memory_mtime = stat.st_mtime
         except Exception:
             pass
+
+    def _ensure_video_info_cache_loaded(self):
+        with self.video_info_cache_lock:
+            if self.video_info_cache_loaded:
+                return
+            self.video_info_cache_loaded = True
+            try:
+                if not self.video_info_cache_file.exists():
+                    return
+                data = json.loads(self.video_info_cache_file.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    self.video_info_cache = data
+            except Exception:
+                self.video_info_cache = {}
+
+    def _persist_video_info_cache(self):
+        with self.video_info_cache_lock:
+            payload = json.dumps(self.video_info_cache, ensure_ascii=False)
+        try:
+            self.video_info_cache_file.write_text(payload, encoding="utf-8")
+        except Exception:
+            pass
+
+    def _ensure_directory_listing_cache_loaded(self):
+        with self.directory_listing_cache_lock:
+            if self.directory_listing_cache_loaded:
+                return
+            self.directory_listing_cache_loaded = True
+            try:
+                if not self.directory_listing_cache_file.exists():
+                    return
+                with open(self.directory_listing_cache_file, "rb") as f:
+                    data = pickle.load(f)
+                if isinstance(data, dict):
+                    self.directory_listing_cache = data
+            except Exception:
+                self.directory_listing_cache = {}
+
+    def _persist_directory_listing_cache(self):
+        with self.directory_listing_cache_lock:
+            payload = dict(self.directory_listing_cache)
+        try:
+            with open(self.directory_listing_cache_file, "wb") as f:
+                pickle.dump(payload, f)
+        except Exception:
+            pass
+
+    def _get_scan_signature(self) -> float:
+        with self.scan_cache_lock:
+            cache = self._load_scan_cache()
+        return float(cache.get("scanned_at", 0) or 0)
 
     def _ensure_video_ids(self, videos: list[dict]) -> list[dict]:
         for video in videos:
@@ -424,7 +500,7 @@ class VideoServer:
                         continue
         videos.sort(key=lambda x: x["modified"], reverse=True)
 
-        if use_cache and not search and not directory:
+        if not search and not directory:
             dir_mtimes = {d: self._get_top_dir_mtime(d) for d in self.video_dirs}
             with self.scan_cache_lock:
                 self._save_scan_cache({"videos": videos, "scanned_at": time.time(), "dir_mtimes": dir_mtimes})
@@ -439,6 +515,14 @@ class VideoServer:
                     pass
             self.scan_cache_memory = {}
             self.scan_cache_memory_mtime = 0.0
+        with self.directory_listing_cache_lock:
+            self.directory_listing_cache = {}
+            self.directory_listing_cache_loaded = True
+            try:
+                if self.directory_listing_cache_file.exists():
+                    self.directory_listing_cache_file.unlink()
+            except Exception:
+                pass
         with self.video_index_lock:
             self.video_index = {}
             self.video_meta_index = {}
@@ -447,8 +531,6 @@ class VideoServer:
         with self.directories_cache_lock:
             self.directories_cache = []
             self.directories_cache_built_at = 0.0
-        with self.video_info_cache_lock:
-            self.video_info_cache = {}
         self.scan_videos(use_cache=False)
 
     def _get_video_index(self) -> dict[str, str]:
@@ -484,11 +566,16 @@ class VideoServer:
         with self.video_index_lock:
             self.video_index.pop(video_id, None)
             self.video_meta_index.pop(video_id, None)
+        self._ensure_video_info_cache_loaded()
         with self.video_info_cache_lock:
             self.video_info_cache.pop(video_path, None)
+        self._persist_video_info_cache()
         with self.directories_cache_lock:
             self.directories_cache = []
             self.directories_cache_built_at = 0.0
+        with self.directory_listing_cache_lock:
+            self.directory_listing_cache = {}
+        self._persist_directory_listing_cache()
 
     def get_scan_cache_status(self) -> dict:
         with self.video_index_lock:
@@ -515,6 +602,7 @@ class VideoServer:
             "bitrate": None,
             "fps": None,
         }
+        self._ensure_video_info_cache_loaded()
         try:
             stat = os.stat(video_path)
             now = time.time()
@@ -564,6 +652,8 @@ class VideoServer:
                 }
         except OSError:
             pass
+        else:
+            self._persist_video_info_cache()
         return info
 
     def _format_duration(self, seconds: float) -> str:
