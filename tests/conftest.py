@@ -117,14 +117,14 @@ def client(tmp_path, monkeypatch):
             return {
                 "current_path": dir_path,
                 "parent_path": "",
-                "folders": [{"name": "Arc One", "path": "Season 1/Arc One"}],
+                "folders": [{"name": "Arc One", "path": "Season 1/Arc One", "video_count": 1, "subfolder_count": 0}],
                 "videos": [fake_videos[1], fake_videos[3]],
             }
 
         return {
             "current_path": dir_path,
             "parent_path": None,
-            "folders": [{"name": "Season 1", "path": "Season 1"}],
+            "folders": [{"name": "Season 1", "path": "Season 1", "video_count": 2, "subfolder_count": 1}],
             "videos": fake_videos,
         }
 

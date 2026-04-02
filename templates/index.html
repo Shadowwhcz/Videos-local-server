@@ -38,7 +38,7 @@
                 {% endif %}
             </form>
             <form class="library-browse-form" method="GET" action="/">
-                <label for="topbarBrowseSelect">快速切换目录</label>
+                <label class="sr-only" for="topbarBrowseSelect">快速切换目录</label>
                 <div class="library-select-wrap">
                     <i class="bi bi-folder2-open"></i>
                     <select id="topbarBrowseSelect" name="browse" onchange="this.form.submit()">
@@ -80,7 +80,7 @@
                         <i class="bi bi-play-fill"></i>
                         继续播放
                     </a>
-                    <a class="hero-secondary-btn" href="{% if current_browse %}/?browse={{ current_browse | urlencode }}{% else %}/{% endif %}">
+                    <a class="hero-secondary-btn" href="{{ hero_browse_href }}">
                         <i class="bi bi-folder2-open"></i>
                         浏览目录
                     </a>
@@ -277,7 +277,14 @@
                 {% for folder in browse_result.folders %}
                 <a class="folder-browser-row" href="/?browse={{ current_browse | urlencode }}&dir_path={{ folder.path | urlencode }}">
                     <span class="folder-browser-icon"><i class="bi bi-folder-fill"></i></span>
-                    <span class="folder-browser-name">{{ folder.name }}</span>
+                    <span class="folder-browser-copy">
+                        <span class="folder-browser-kicker">目录层级</span>
+                        <span class="folder-browser-name">{{ folder.name }}</span>
+                        <span class="folder-browser-meta">
+                            <span class="folder-browser-meta-chip">{{ folder.subfolder_count }} 个子目录</span>
+                            <span class="folder-browser-meta-chip">{{ folder.video_count }} 个视频</span>
+                        </span>
+                    </span>
                     <span class="folder-browser-arrow"><i class="bi bi-chevron-right"></i></span>
                 </a>
                 {% endfor %}

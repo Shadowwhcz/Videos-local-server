@@ -417,6 +417,16 @@ async def index(
             params["dir_path"] = dir_path
         return f"/?{urlencode(params)}"
 
+    def build_default_browse_href() -> str:
+        if browse:
+            params = {"browse": browse}
+            if dir_path:
+                params["dir_path"] = dir_path
+            return f"/?{urlencode(params)}"
+        if directories:
+            return f"/?{urlencode({'browse': directories[0]['path']})}"
+        return "/"
+
     def build_pagination(total_items: int, total_page_count: int) -> Optional[dict]:
         if total_page_count <= 1:
             return None
@@ -629,6 +639,7 @@ async def index(
                 "directory_snapshot": build_directory_snapshot(total_items, True, browse_result),
                 "view_feedback": build_view_feedback(total_items, True),
                 "empty_state": build_empty_state(True),
+                "hero_browse_href": build_default_browse_href(),
             }
         )
     
@@ -670,6 +681,7 @@ async def index(
             "directory_snapshot": build_directory_snapshot(total, False),
             "view_feedback": build_view_feedback(total, False),
             "empty_state": build_empty_state(False),
+            "hero_browse_href": build_default_browse_href(),
         }
     )
 

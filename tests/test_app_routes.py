@@ -9,6 +9,7 @@ def test_index_renders_video_library_shell(client: AppClient):
     assert "Library" in response.text
     assert "片库根目录" in response.text
     assert "可立即播放" in response.text
+    assert 'class="hero-secondary-btn" href="/?browse=%2Flibrary"' in response.text
     assert "ConnectHub" not in response.text
 
 
@@ -35,6 +36,13 @@ def test_index_renders_back_to_parent_folder_for_nested_directory(client: AppCli
     assert "返回上一级目录" in response.text
     assert "dir_path=Season%201" in response.text
     assert '>Season 1</a>' in response.text
+
+
+def test_index_renders_folder_row_counts(client: AppClient):
+    response = client.get("/?browse=/library")
+    assert response.status_code == 200
+    assert "1 个子目录" in response.text
+    assert "2 个视频" in response.text
 
 
 def test_index_renders_directory_snapshot_for_browse_context(client: AppClient):

@@ -134,48 +134,85 @@ class VideoServer:
         if not os.path.exists(full_path):
             return {"error": "目录不存在"}
 
-        folders = []
+        current_path = relative_path.strip(os.sep)
+        current_prefix = f"{current_path}{os.sep}" if current_path else ""
+        base_videos = [
+            dict(video)
+            for video in self.scan_videos(use_cache=True)
+            if video.get("base_dir") == directory
+        ]
+        folder_map: dict[str, dict] = {}
         videos = []
-        try:
-            items = sorted(os.listdir(full_path), key=lambda x: x.lower())
-        except PermissionError:
-            return {"error": "无法访问该目录"}
 
-        for item in items:
-            item_path = os.path.join(full_path, item)
-            item_rel_path = os.path.join(relative_path, item) if relative_path else item
-            if os.path.isdir(item_path):
-                has_videos = self._has_videos_recursive(item_path)
-                if has_videos:
-                    folders.append({"name": item, "path": item_rel_path, "type": "folder"})
+        for video in base_videos:
+            rel_path = video.get("rel_path", "")
+            if not rel_path:
+                continue
+            if current_prefix:
+                if not rel_path.startswith(current_prefix):
+                    continue
+                remaining_path = rel_path[len(current_prefix):]
             else:
-                ext = os.path.splitext(item)[1].lower()
-                if ext in self.extensions:
-                    if self.is_temp_file(item_path):
-                        continue
-                    try:
-                        stat = os.stat(item_path)
-                        videos.append(
-                            {
-                                "id": get_video_id(item_path),
-                                "name": item,
-                                "path": item_path,
-                                "rel_path": item_rel_path,
-                                "size": stat.st_size,
-                                "size_mb": round(stat.st_size / (1024 * 1024), 1),
-                                "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
-                                "ext": ext[1:].upper(),
-                                "base_dir": directory,
-                            }
-                        )
-                    except (OSError, IOError):
-                        continue
+                remaining_path = rel_path
+            if not remaining_path:
+                continue
+
+            path_parts = remaining_path.split(os.sep)
+            if len(path_parts) == 1:
+                videos.append(video)
+                continue
+
+            folder_name = path_parts[0]
+            folder_rel_path = os.path.join(current_path, folder_name) if current_path else folder_name
+            folder_entry = folder_map.setdefault(
+                folder_rel_path,
+                {
+                    "name": folder_name,
+                    "path": folder_rel_path,
+                    "type": "folder",
+                    "video_count": 0,
+                    "subfolder_names": set(),
+                },
+            )
+            if len(path_parts) == 2:
+                folder_entry["video_count"] += 1
+            else:
+                folder_entry["subfolder_names"].add(path_parts[1])
+
+        folders = []
+        for folder_entry in sorted(folder_map.values(), key=lambda entry: entry["name"].lower()):
+            folders.append(
+                {
+                    "name": folder_entry["name"],
+                    "path": folder_entry["path"],
+                    "type": folder_entry["type"],
+                    "subfolder_count": len(folder_entry["subfolder_names"]),
+                    "video_count": folder_entry["video_count"],
+                }
+            )
+        videos.sort(key=lambda video: video["name"].lower())
         return {
             "folders": folders,
             "videos": videos,
-            "current_path": relative_path,
-            "parent_path": os.path.dirname(relative_path) if relative_path else None,
+            "current_path": current_path,
+            "parent_path": os.path.dirname(current_path) if current_path else None,
         }
+
+    def _summarize_folder(self, directory: str) -> tuple[int, int]:
+        subfolder_count = 0
+        video_count = 0
+        try:
+            for item in os.listdir(directory):
+                item_path = os.path.join(directory, item)
+                if os.path.isdir(item_path):
+                    if self._has_videos_recursive(item_path):
+                        subfolder_count += 1
+                elif os.path.isfile(item_path):
+                    if os.path.splitext(item)[1].lower() in self.extensions and not self.is_temp_file(item_path):
+                        video_count += 1
+        except Exception:
+            pass
+        return subfolder_count, video_count
 
     def _has_videos_recursive(self, directory: str, max_depth: int = 3) -> bool:
         if max_depth <= 0:
@@ -211,6 +248,12 @@ class VideoServer:
         except Exception:
             pass
         return max_mtime
+
+    def _get_top_dir_mtime(self, directory: str) -> float:
+        try:
+            return os.stat(directory).st_mtime
+        except Exception:
+            return 0.0
 
     def _load_scan_cache(self) -> dict:
         try:
@@ -270,7 +313,7 @@ class VideoServer:
         cached_mtimes = cache.get("dir_mtimes", {})
         is_valid = True
         for base_dir in self.video_dirs:
-            current_mtime = self._get_dir_mtime(base_dir)
+            current_mtime = self._get_top_dir_mtime(base_dir)
             cached_mtime = cached_mtimes.get(base_dir, 0)
             if current_mtime > cached_mtime:
                 is_valid = False
@@ -326,7 +369,7 @@ class VideoServer:
         videos.sort(key=lambda x: x["modified"], reverse=True)
 
         if use_cache and not search and not directory:
-            dir_mtimes = {d: self._get_dir_mtime(d) for d in self.video_dirs}
+            dir_mtimes = {d: self._get_top_dir_mtime(d) for d in self.video_dirs}
             with self.scan_cache_lock:
                 self._save_scan_cache({"videos": videos, "scanned_at": time.time(), "dir_mtimes": dir_mtimes})
         return videos
