@@ -3421,6 +3421,16 @@ footer small {
     border-color: rgba(129, 236, 255, 0.3);
 }
 
+.pagination-ellipsis {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2rem;
+    color: #9eacc0;
+    font-size: 0.95rem;
+    letter-spacing: 0.18em;
+}
+
 /* ============================================
    Electric Cyber Player
    ============================================ */
@@ -3959,6 +3969,75 @@ footer small {
         gap: 0.5rem;
     }
 
+    .library-grid-section .video-grid {
+        grid-template-columns: 1fr;
+        gap: 0.9rem;
+        width: 100%;
+        margin: 0;
+    }
+
+    .library-grid-section .video-card {
+        display: grid;
+        grid-template-columns: minmax(7.5rem, 36vw) minmax(0, 1fr);
+        align-items: stretch;
+    }
+
+    .library-grid-section .video-thumb {
+        aspect-ratio: auto;
+        min-height: 100%;
+    }
+
+    .library-grid-section .video-card-topline {
+        top: 0.65rem;
+        left: 0.65rem;
+        right: 0.65rem;
+    }
+
+    .library-grid-section .video-status-chip {
+        padding: 0.28rem 0.55rem;
+        font-size: 0.58rem;
+        letter-spacing: 0.12em;
+    }
+
+    .library-grid-section .video-info {
+        display: grid;
+        align-content: start;
+        gap: 0.45rem;
+        padding: 0.85rem 0.9rem;
+    }
+
+    .library-grid-section .video-title,
+    .cyber-video-info .video-title {
+        margin-bottom: 0;
+        min-height: 0;
+        font-size: 0.95rem;
+        line-height: 1.35;
+    }
+
+    .library-grid-section .video-folder,
+    .cyber-video-info .video-folder {
+        margin-bottom: 0;
+        font-size: 0.72rem;
+    }
+
+    .library-grid-section .video-lane-state {
+        margin-top: 0.1rem;
+    }
+
+    .library-grid-section .video-meta,
+    .cyber-video-info .video-meta {
+        gap: 0.4rem 0.6rem;
+    }
+
+    .library-grid-section .video-meta span,
+    .cyber-video-info .video-meta span {
+        font-size: 0.68rem;
+    }
+
+    .video-card-wrapper .video-delete-btn {
+        opacity: 1;
+    }
+
     .player-detail-grid {
         grid-template-columns: 1fr;
     }
@@ -4010,5 +4089,44 @@ footer small {
 
     .shortcuts-panel {
         display: none;
+    }
+
+    .library-pagination {
+        gap: 0.85rem;
+        padding: 0.95rem;
+    }
+
+    .pagination-summary {
+        letter-spacing: 0.08em;
+        line-height: 1.5;
+    }
+
+    .pagination-actions {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+    }
+
+    .pagination-pages {
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+        overflow-x: auto;
+        padding-bottom: 0.2rem;
+        scrollbar-width: none;
+    }
+
+    .pagination-pages::-webkit-scrollbar {
+        display: none;
+    }
+
+    .pagination-link,
+    .pagination-link-nav {
+        width: auto;
+        min-width: 2.75rem;
+        flex: 0 0 auto;
+    }
+
+    .pagination-link-nav {
+        justify-content: center;
     }
 }

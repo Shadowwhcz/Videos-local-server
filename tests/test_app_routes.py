@@ -25,6 +25,42 @@ def test_index_renders_pagination_navigation(client: AppClient):
     assert "?page=1" in response.text
 
 
+def test_index_condenses_large_pagination_ranges(client: AppClient, monkeypatch):
+    videos = [
+        {
+            "id": f"video-{index}",
+            "name": f"Episode {index}.mp4",
+            "path": f"/tmp/video-{index}.mp4",
+            "rel_path": f"Season 1/Episode {index}.mp4",
+            "parent_dir": "Season 1",
+            "size": 1024,
+            "size_mb": 0.1,
+            "modified": "2026-03-27 12:00",
+            "ext": "MP4",
+            "base_dir": "/library",
+        }
+        for index in range(1, 25)
+    ]
+
+    monkeypatch.setattr(app_module.video_server, "scan_videos", lambda *args, **kwargs: videos)
+    monkeypatch.setattr(
+        app_module.video_server,
+        "get_directories",
+        lambda cached_only=False: [{"name": "Library", "path": "/library", "video_count": len(videos)}],
+    )
+
+    response = client.get("/?page=6")
+
+    assert response.status_code == 200
+    assert 'class="pagination-ellipsis"' in response.text
+    assert 'href="/?page=4"' in response.text
+    assert 'href="/?page=5"' in response.text
+    assert 'class="pagination-link active"' in response.text
+    assert 'href="/?page=6"' in response.text
+    assert 'href="/?page=7"' in response.text
+    assert 'href="/?page=12"' in response.text
+
+
 def test_index_renders_directory_browser_rows(client: AppClient):
     response = client.get("/?browse=/library&dir_path=Season%201")
     assert response.status_code == 200

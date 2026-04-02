@@ -385,9 +385,13 @@
 
                     <div class="pagination-pages">
                         {% for item in pagination.page_links %}
+                        {% if item.url %}
                         <a class="pagination-link {% if item.active %}active{% endif %}" href="{{ item.url }}">
-                            {{ item.number }}
+                            {{ item.label }}
                         </a>
+                        {% else %}
+                        <span class="pagination-ellipsis" aria-hidden="true">{{ item.label }}</span>
+                        {% endif %}
                         {% endfor %}
                     </div>
 

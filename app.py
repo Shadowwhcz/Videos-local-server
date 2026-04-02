@@ -628,15 +628,30 @@ async def index(
 
         start_item = ((page - 1) * per_page) + 1 if total_items else 0
         end_item = min(page * per_page, total_items)
-        return {
-            "page_links": [
+
+        window = 2
+        candidate_pages = {1, total_page_count}
+        for page_number in range(page - window, page + window + 1):
+            if 1 <= page_number <= total_page_count:
+                candidate_pages.add(page_number)
+
+        sorted_pages = sorted(candidate_pages)
+        page_links: list[dict] = []
+        last_page_number = 0
+        for page_number in sorted_pages:
+            if page_number - last_page_number > 1:
+                page_links.append({"label": "…", "url": None, "active": False})
+            page_links.append(
                 {
-                    "number": page_number,
+                    "label": str(page_number),
                     "url": build_page_url(page_number),
                     "active": page_number == page,
                 }
-                for page_number in range(1, total_page_count + 1)
-            ],
+            )
+            last_page_number = page_number
+
+        return {
+            "page_links": page_links,
             "prev_url": build_page_url(page - 1) if page > 1 else None,
             "next_url": build_page_url(page + 1) if page < total_page_count else None,
             "summary": f"第 {start_item}-{end_item} 项 / 共 {total_items} 项",
