@@ -16,6 +16,7 @@ const BATCH_DELAY = 100;        // 批量请求延迟(ms)
 const MAX_CONCURRENT = 3;       // 最大并发请求数
 const STATUS_BATCH_SIZE = 20;   // 状态检查批量大小
 const DURATION_BATCH_SIZE = 10; // 时长获取批量大小
+const PLAYER_MONITOR_DEDUP_MS = 4000;
 
 // 请求队列管理
 class RequestQueue {
@@ -50,6 +51,7 @@ class RequestQueue {
 }
 
 const requestQueue = new RequestQueue();
+const playerMonitorEventCache = new Map();
 
 document.addEventListener('DOMContentLoaded', function() {
     // 初始化所有功能（分批加载，减少并发）
@@ -494,6 +496,36 @@ function formatDuration(seconds) {
     return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
 }
 
+function shouldSendPlayerMonitorEvent(videoId, eventName, windowMs = PLAYER_MONITOR_DEDUP_MS) {
+    const key = `${videoId}:${eventName}`;
+    const now = Date.now();
+    const previous = playerMonitorEventCache.get(key) || 0;
+    if ((now - previous) < windowMs) {
+        return false;
+    }
+    playerMonitorEventCache.set(key, now);
+    return true;
+}
+
+function sendPlayerMonitorEvent(video, eventName, details = {}, level = 'info', windowMs = PLAYER_MONITOR_DEDUP_MS) {
+    if (!video?.dataset?.videoId) return;
+    if (!shouldSendPlayerMonitorEvent(video.dataset.videoId, eventName, windowMs)) return;
+
+    fetch('/api/monitor/client-event', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        keepalive: true,
+        body: JSON.stringify({
+            event: eventName,
+            level,
+            video_id: video.dataset.videoId,
+            details
+        })
+    }).catch(() => {});
+}
+
 /**
  * 获取视频信息API
  */
@@ -544,6 +576,54 @@ function initPlayer() {
 
     video.addEventListener('loadedmetadata', function() {
         updatePlayerMetadata();
+        sendPlayerMonitorEvent(video, 'loadedmetadata', {
+            duration: video.duration,
+            resolution: video.videoWidth && video.videoHeight ? `${video.videoWidth}x${video.videoHeight}` : null,
+            ready_state: video.readyState,
+            network_state: video.networkState
+        }, 'info', 0);
+    });
+
+    video.addEventListener('canplay', function() {
+        sendPlayerMonitorEvent(video, 'canplay', {
+            ready_state: video.readyState,
+            network_state: video.networkState,
+            current_time: video.currentTime
+        }, 'info', 0);
+    });
+
+    video.addEventListener('playing', function() {
+        sendPlayerMonitorEvent(video, 'playing', {
+            current_time: video.currentTime,
+            ready_state: video.readyState,
+            network_state: video.networkState
+        }, 'info', 8000);
+    });
+
+    video.addEventListener('waiting', function() {
+        sendPlayerMonitorEvent(video, 'waiting', {
+            current_time: video.currentTime,
+            ready_state: video.readyState,
+            network_state: video.networkState
+        }, 'warning', 3000);
+    });
+
+    video.addEventListener('stalled', function() {
+        sendPlayerMonitorEvent(video, 'stalled', {
+            current_time: video.currentTime,
+            ready_state: video.readyState,
+            network_state: video.networkState
+        }, 'warning', 2000);
+    });
+
+    video.addEventListener('error', function() {
+        sendPlayerMonitorEvent(video, 'error', {
+            current_time: video.currentTime,
+            ready_state: video.readyState,
+            network_state: video.networkState,
+            error_code: video.error?.code || null,
+            current_src: video.currentSrc || ''
+        }, 'error', 0);
     });
     
     // 定期保存播放位置

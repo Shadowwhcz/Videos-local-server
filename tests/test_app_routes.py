@@ -1,3 +1,6 @@
+import json
+from datetime import datetime, timedelta
+
 from conftest import AppClient
 import app as app_module
 
@@ -177,3 +180,92 @@ def test_play_renders_async_metadata_placeholders(client: AppClient):
     assert 'class="js-player-resolution"' in response.text
     assert 'class="js-player-duration"' in response.text
     assert ">--<" in response.text
+
+
+def test_monitor_logs_endpoint_includes_playback_entries(client: AppClient):
+    app_module.monitor_log_store.clear()
+
+    response = client.get("/play/video-1")
+    assert response.status_code == 200
+
+    logs_response = client.get("/api/monitor/logs?video_id=video-1")
+    assert logs_response.status_code == 200
+    payload = logs_response.json()
+
+    assert payload["entries"]
+    assert payload["entries"][0]["video_id"] == "video-1"
+    assert any(entry["event"] == "play_page_opened" for entry in payload["entries"])
+    assert payload["retention"]["days"] >= 1
+
+
+def test_monitor_client_event_endpoint_records_remote_player_signals(client: AppClient):
+    app_module.monitor_log_store.clear()
+
+    response = client.post(
+        "/api/monitor/client-event",
+        json={
+            "event": "stalled",
+            "level": "warning",
+            "video_id": "video-2",
+            "details": {
+                "current_time": 42.5,
+                "ready_state": 2,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["entry"]["event"] == "client_stalled"
+
+    logs_response = client.get("/api/monitor/logs?event=client_stalled")
+    assert logs_response.status_code == 200
+    logs_payload = logs_response.json()
+    assert logs_payload["entries"][0]["video_id"] == "video-2"
+    assert logs_payload["entries"][0]["details"]["ready_state"] == 2
+
+
+def test_monitor_log_store_prunes_expired_entries(tmp_path):
+    log_path = tmp_path / "monitor.jsonl"
+    now = datetime(2026, 4, 3, 12, 0, 0)
+    stale_entry = {
+        "timestamp": (now - timedelta(minutes=10)).isoformat(timespec="seconds"),
+        "event": "client_waiting",
+        "level": "warning",
+        "video_id": "stale-video",
+    }
+    fresh_entry = {
+        "timestamp": (now - timedelta(seconds=20)).isoformat(timespec="seconds"),
+        "event": "client_playing",
+        "level": "info",
+        "video_id": "fresh-video",
+    }
+    log_path.write_text(
+        "\n".join(json.dumps(entry, ensure_ascii=False) for entry in (stale_entry, fresh_entry)) + "\n",
+        encoding="utf-8",
+    )
+
+    store = app_module.MonitorLogStore(log_path, max_entries=10, retention_seconds=60)
+    store.prune_expired_entries(reference_time=now)
+
+    payload = store.query(limit=10)
+    assert len(payload["entries"]) == 1
+    assert payload["entries"][0]["video_id"] == "fresh-video"
+    persisted = log_path.read_text(encoding="utf-8")
+    assert "fresh-video" in persisted
+    assert "stale-video" not in persisted
+
+
+def test_monitor_clear_endpoint_resets_buffered_logs(client: AppClient):
+    app_module.monitor_log_store.clear()
+    client.get("/play/video-1")
+    assert app_module.monitor_log_store.query(limit=10)["entries"]
+
+    response = client.post("/api/monitor/clear")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["cleared_entries"] >= 1
+    assert app_module.monitor_log_store.query(limit=10)["entries"] == []

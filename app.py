@@ -6,17 +6,17 @@ from __future__ import annotations
 import os
 import configparser
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 import json
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import unquote, urlencode
 import threading
 import time
 import asyncio
 from contextlib import asynccontextmanager
 from functools import lru_cache
-from collections import OrderedDict
+from collections import Counter, OrderedDict, deque
 import io
 
 from fastapi import FastAPI, Request, Query, HTTPException, Depends, Form, BackgroundTasks, Body
@@ -48,11 +48,15 @@ FILE_HANDLE_TTL = 300  # 文件句柄缓存时间（秒）
 _config = configparser.ConfigParser()
 _config.read("config.ini", encoding='utf-8')
 _secret_key = _config.get('auth', 'secret_key', fallback='videoserver-secret-key-change-in-production')
+MONITOR_LOG_RETENTION_DAYS = _config.getint("server", "monitor_log_retention_days", fallback=7)
+MONITOR_LOG_CLEANUP_INTERVAL = _config.getint("server", "monitor_log_cleanup_interval_seconds", fallback=900)
 
 session_manager = None
 
 # 获取项目根目录
 BASE_DIR = Path(__file__).resolve().parent
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True)
 
 # 初始化全局 Session 管理器
 SESSION_STORAGE_DIR = BASE_DIR / "sessions"
@@ -60,6 +64,181 @@ session_manager = SessionManager(storage_dir=SESSION_STORAGE_DIR, secret_key=_se
 
 THUMBNAIL_DIR = BASE_DIR / "thumbnails"
 THUMBNAIL_DIR.mkdir(exist_ok=True)
+
+
+class MonitorLogStore:
+    def __init__(self, file_path: Path, max_entries: int = 800, retention_seconds: int = MONITOR_LOG_RETENTION_DAYS * 24 * 60 * 60):
+        self.file_path = file_path
+        self.max_entries = max_entries
+        self.retention_seconds = retention_seconds
+        self.lock = threading.RLock()
+        self.entries: deque[dict[str, Any]] = deque(maxlen=max_entries)
+        self._load_existing_entries()
+
+    def _parse_timestamp(self, value: str | None) -> datetime | None:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+
+    def _is_entry_retained(self, entry: dict[str, Any], cutoff: datetime) -> bool:
+        entry_time = self._parse_timestamp(entry.get("timestamp"))
+        return bool(entry_time and entry_time >= cutoff)
+
+    def _collect_retained_entries_from_disk(self, cutoff: datetime) -> list[dict[str, Any]]:
+        if not self.file_path.exists():
+            return []
+        retained_entries: list[dict[str, Any]] = []
+        try:
+            with open(self.file_path, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if self._is_entry_retained(entry, cutoff):
+                        retained_entries.append(entry)
+        except OSError:
+            return []
+        return retained_entries[-self.max_entries:]
+
+    def _load_existing_entries(self):
+        try:
+            cutoff = datetime.now() - timedelta(seconds=self.retention_seconds)
+            retained_entries = self._collect_retained_entries_from_disk(cutoff)
+            self.entries = deque(retained_entries, maxlen=self.max_entries)
+            self.prune_expired_entries()
+        except Exception:
+            self.entries.clear()
+
+    def _sanitize_value(self, value: Any) -> Any:
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        if isinstance(value, str):
+            return value[:300]
+        if isinstance(value, dict):
+            sanitized: dict[str, Any] = {}
+            for key, item in list(value.items())[:20]:
+                sanitized[str(key)[:60]] = self._sanitize_value(item)
+            return sanitized
+        if isinstance(value, (list, tuple, set)):
+            return [self._sanitize_value(item) for item in list(value)[:20]]
+        return str(value)[:300]
+
+    def record(self, event: str, level: str = "info", **fields: Any) -> dict[str, Any]:
+        entry = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "event": event,
+            "level": level,
+        }
+        for key, value in fields.items():
+            if value is None:
+                continue
+            entry[str(key)] = self._sanitize_value(value)
+        with self.lock:
+            self.entries.append(entry)
+        try:
+            with open(self.file_path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+        return entry
+
+    def query(self, limit: int = 100, event: str = "", video_id: str = "", level: str = "") -> dict[str, Any]:
+        with self.lock:
+            entries = list(self.entries)
+        if event:
+            entries = [entry for entry in entries if entry.get("event") == event]
+        if video_id:
+            entries = [entry for entry in entries if entry.get("video_id") == video_id]
+        if level:
+            entries = [entry for entry in entries if entry.get("level") == level]
+        filtered_entries = entries[-limit:]
+        filtered_entries.reverse()
+        return {
+            "entries": filtered_entries,
+            "total_buffered": len(entries),
+            "buffer_size": self.max_entries,
+            "event_counts": dict(Counter(entry.get("event", "") for entry in filtered_entries)),
+            "level_counts": dict(Counter(entry.get("level", "") for entry in filtered_entries)),
+        }
+
+    def clear(self):
+        with self.lock:
+            self.entries.clear()
+        try:
+            self.file_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    def prune_expired_entries(self, reference_time: datetime | None = None):
+        cutoff = (reference_time or datetime.now()) - timedelta(seconds=self.retention_seconds)
+        retained_entries = self._collect_retained_entries_from_disk(cutoff)
+        if not retained_entries:
+            with self.lock:
+                self.entries.clear()
+            try:
+                self.file_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return
+
+        with self.lock:
+            self.entries = deque(retained_entries, maxlen=self.max_entries)
+
+        temp_path = self.file_path.with_suffix(f"{self.file_path.suffix}.tmp")
+        try:
+            with open(temp_path, "w", encoding="utf-8") as handle:
+                for entry in retained_entries:
+                    handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            temp_path.replace(self.file_path)
+        except OSError:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+monitor_log_store = MonitorLogStore(LOG_DIR / "playback_monitor.jsonl")
+
+
+async def monitor_log_cleanup_loop(stop_event: asyncio.Event):
+    while not stop_event.is_set():
+        monitor_log_store.prune_expired_entries()
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=MONITOR_LOG_CLEANUP_INTERVAL)
+        except asyncio.TimeoutError:
+            continue
+
+
+def get_client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+def record_monitor_event(
+    event: str,
+    level: str = "info",
+    request: Request | None = None,
+    video_id: str | None = None,
+    **fields: Any,
+) -> dict[str, Any]:
+    if request is not None:
+        fields.setdefault("request_path", request.url.path)
+        fields.setdefault("method", request.method)
+        fields.setdefault("client_ip", get_client_ip(request))
+        fields.setdefault("user_agent", request.headers.get("user-agent", "Unknown"))
+    if video_id:
+        fields.setdefault("video_id", video_id)
+    return monitor_log_store.record(event, level=level, **fields)
 
 # ==================== 文件句柄缓存 ====================
 class FileHandleCache:
@@ -183,9 +362,17 @@ file_handle_cache = FileHandleCache()
 
 @asynccontextmanager
 async def app_lifespan(_: FastAPI):
+    monitor_log_stop_event = asyncio.Event()
+    cleanup_task = asyncio.create_task(monitor_log_cleanup_loop(monitor_log_stop_event))
     try:
         yield
     finally:
+        monitor_log_stop_event.set()
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
         print("🔄 关闭文件句柄缓存...")
         file_handle_cache.close_all()
         print("✅ 清理完成")
@@ -749,13 +936,23 @@ async def play(request: Request, video_id: str):
     """播放页面"""
     # 认证检查
     if video_server.auth_enabled and not get_current_user(request):
+        record_monitor_event("play_page_unauthorized", level="warning", request=request, video_id=video_id)
         return RedirectResponse(url="/login", status_code=302)
     
     video = video_server.get_video_by_id(video_id)
     if not video:
+        record_monitor_event("play_page_missing_video", level="error", request=request, video_id=video_id)
         raise HTTPException(status_code=404, detail="视频不存在")
 
     video['id'] = video_id
+    record_monitor_event(
+        "play_page_opened",
+        request=request,
+        video_id=video_id,
+        video_name=video.get("name"),
+        parent_dir=video.get("parent_dir") or "片库根目录",
+        base_dir=video.get("base_dir"),
+    )
 
     same_folder_videos = []
     library_fallback_videos = []
@@ -862,21 +1059,31 @@ async def stream_video(video_id: str, request: Request):
     """
     # 认证检查
     if video_server.auth_enabled and not get_current_user(request):
+        record_monitor_event("stream_unauthorized", level="warning", request=request, video_id=video_id)
         raise HTTPException(status_code=401, detail="未登录")
     
     video_path = video_server.get_video_path(video_id)
     
     if not video_path:
+        record_monitor_event("stream_missing_video", level="error", request=request, video_id=video_id)
         raise HTTPException(status_code=404, detail="视频不存在")
 
     try:
         stat = os.stat(video_path)
     except OSError:
+        record_monitor_event(
+            "stream_stat_failed",
+            level="error",
+            request=request,
+            video_id=video_id,
+            video_name=os.path.basename(video_path),
+        )
         raise HTTPException(status_code=404, detail="视频不存在")
 
     file_size = stat.st_size
     mime_type = get_mime_type(video_path)
     etag = f'"{stat.st_mtime}-{stat.st_size}"'
+    video_name = os.path.basename(video_path)
     
     # 基础响应头
     base_headers = {
@@ -889,6 +1096,13 @@ async def stream_video(video_id: str, request: Request):
     
     # HEAD请求只返回头信息
     if request.method == 'HEAD':
+        record_monitor_event(
+            "stream_head",
+            request=request,
+            video_id=video_id,
+            video_name=video_name,
+            file_size=file_size,
+        )
         return Response(
             status_code=200,
             headers={**base_headers, 'Content-Length': str(file_size)},
@@ -913,6 +1127,15 @@ async def stream_video(video_id: str, request: Request):
         
         if not ranges:
             # 无效的Range请求
+            record_monitor_event(
+                "stream_invalid_range",
+                level="warning",
+                request=request,
+                video_id=video_id,
+                video_name=video_name,
+                file_size=file_size,
+                range_header=range_header,
+            )
             return Response(
                 status_code=416,
                 headers={
@@ -951,7 +1174,14 @@ async def stream_video(video_id: str, request: Request):
                     yield data
                 
             except Exception as e:
-                print(f"Stream error: {e}")
+                record_monitor_event(
+                    "stream_iterator_error",
+                    level="error",
+                    request=request,
+                    video_id=video_id,
+                    video_name=video_name,
+                    detail=str(e),
+                )
             finally:
                 try:
                     if f:
@@ -964,6 +1194,17 @@ async def stream_video(video_id: str, request: Request):
             'Content-Range': f'bytes {start}-{end}/{file_size}',
             'Content-Length': str(content_length),
         }
+        record_monitor_event(
+            "stream_partial_response",
+            request=request,
+            video_id=video_id,
+            video_name=video_name,
+            file_size=file_size,
+            content_length=content_length,
+            range_start=start,
+            range_end=end,
+            range_header=range_header,
+        )
         
         return StreamingResponse(
             iterfile_optimized(),
@@ -981,13 +1222,27 @@ async def stream_video(video_id: str, request: Request):
                 while chunk := f.read(chunk_size):
                     yield chunk
             except Exception as e:
-                print(f"Stream error: {e}")
+                record_monitor_event(
+                    "stream_iterator_error",
+                    level="error",
+                    request=request,
+                    video_id=video_id,
+                    video_name=video_name,
+                    detail=str(e),
+                )
             finally:
                 try:
                     if f:
                         f.close()
                 except:
                     pass
+        record_monitor_event(
+            "stream_full_response",
+            request=request,
+            video_id=video_id,
+            video_name=video_name,
+            file_size=file_size,
+        )
         
         return StreamingResponse(
             iterfile_full(),
@@ -1030,6 +1285,7 @@ async def api_video_info(video_id: str):
     """API: 获取视频详细信息"""
     video = video_server.get_video_by_id(video_id)
     if not video:
+        record_monitor_event("video_info_missing_video", level="error", video_id=video_id)
         raise HTTPException(status_code=404, detail="视频不存在")
     video_path = video["path"]
     info = video_server.get_video_info(video_path)
@@ -1042,7 +1298,15 @@ async def api_video_info(video_id: str):
         info['size'] = stat.st_size
         info['size_mb'] = round(stat.st_size / (1024 * 1024), 1)
         info['modified'] = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
-    
+
+    record_monitor_event(
+        "video_info_resolved",
+        video_id=video_id,
+        video_name=video.get("name"),
+        duration=info.get("duration_formatted"),
+        resolution=info.get("resolution"),
+        codec=info.get("codec"),
+    )
     return info
 
 
@@ -1079,6 +1343,65 @@ async def api_config():
             "prefetch_size_mb": STREAM_PREFETCH_SIZE / (1024 * 1024),
             "file_handle_cache_size": FILE_HANDLE_CACHE_SIZE,
         }
+    }
+
+
+@app.get("/api/monitor/logs")
+async def api_monitor_logs(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=500),
+    event: str = Query(default=""),
+    video_id: str = Query(default=""),
+    level: str = Query(default=""),
+):
+    if video_server.auth_enabled and not get_current_user(request):
+        raise HTTPException(status_code=401, detail="未登录")
+    payload = monitor_log_store.query(limit=limit, event=event, video_id=video_id, level=level)
+    return {
+        **payload,
+        "filters": {
+            "limit": limit,
+            "event": event,
+            "video_id": video_id,
+            "level": level,
+        },
+        "retention": {
+            "days": MONITOR_LOG_RETENTION_DAYS,
+            "cleanup_interval_seconds": MONITOR_LOG_CLEANUP_INTERVAL,
+        },
+    }
+
+
+@app.post("/api/monitor/client-event")
+async def api_monitor_client_event(request: Request, payload: dict = Body(default_factory=dict)):
+    if video_server.auth_enabled and not get_current_user(request):
+        raise HTTPException(status_code=401, detail="未登录")
+    event_name = str(payload.get("event") or "unknown").strip()[:80]
+    video_id = str(payload.get("video_id") or "").strip()[:80] or None
+    level = str(payload.get("level") or "info").strip()[:20] or "info"
+    details = payload.get("details") if isinstance(payload, dict) else {}
+    entry = record_monitor_event(
+        f"client_{event_name}",
+        level=level,
+        request=request,
+        video_id=video_id,
+        source="client",
+        details=details if isinstance(details, dict) else {"value": details},
+    )
+    return {"success": True, "entry": entry}
+
+
+@app.post("/api/monitor/clear")
+async def api_monitor_clear(request: Request):
+    if video_server.auth_enabled and not get_current_user(request):
+        raise HTTPException(status_code=401, detail="未登录")
+    buffered_count = len(monitor_log_store.entries)
+    monitor_log_store.clear()
+    return {
+        "success": True,
+        "message": "监控日志已清空",
+        "cleared_entries": buffered_count,
+        "cleared_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
 
