@@ -29,7 +29,7 @@
     <main class="player-layout">
         <section class="player-stage">
             <div class="player-stage-copy">
-                <p class="player-kicker">{{ video.ext }} · {{ video.size_mb }} MB</p>
+                <p class="player-kicker">正在播放 · {{ video.ext }} · {{ video.size_mb }} MB</p>
                 <h1>{{ video.name }}</h1>
                 <p>{{ video.parent_dir or video.rel_path }}</p>
             </div>
@@ -49,27 +49,31 @@
                         <source src="/stream/{{ video.id }}" type="video/{{ video.ext|lower }}">
                         您的浏览器不支持视频播放，请使用现代浏览器。
                     </video>
-                    <div class="player-overlay-panel">
-                        <div class="player-overlay-copy">
-                            <span class="player-overlay-kicker">正在播放</span>
-                            <strong>{{ video.name }}</strong>
-                            <div class="player-overlay-meta">
-                                <span>{{ video.parent_dir or "片库根目录" }}</span>
-                                <span>{{ video.modified }}</span>
-                                <span class="js-player-duration">{{ video.duration_formatted or "--:--" }}</span>
-                            </div>
-                        </div>
-                        {% if jump_to_next %}
-                        <a class="player-overlay-action" href="/play/{{ jump_to_next.id }}">
-                            <span>跳到下一条</span>
-                            <strong>{{ jump_to_next.name }}</strong>
-                        </a>
-                        {% endif %}
-                    </div>
                     <button class="mobile-fullscreen-btn" id="mobileFullscreenBtn" aria-label="全屏">
                         <i class="bi bi-arrows-fullscreen"></i>
                     </button>
                 </div>
+            </div>
+
+            <div class="player-stage-footer">
+                <div class="player-stage-summary">
+                    <div class="player-stage-badge">
+                        <span>当前文件</span>
+                        <strong>{{ video.name }}</strong>
+                    </div>
+                    <div class="player-stage-meta">
+                        <span>{{ video.parent_dir or "片库根目录" }}</span>
+                        <span>{{ video.modified }}</span>
+                        <span class="js-player-duration">{{ video.duration_formatted or "--:--" }}</span>
+                        <span class="js-player-resolution">{{ video.resolution or "--" }}</span>
+                    </div>
+                </div>
+                {% if jump_to_next %}
+                <a class="player-stage-next" href="/play/{{ jump_to_next.id }}">
+                    <span>跳到下一条</span>
+                    <strong>{{ jump_to_next.name }}</strong>
+                </a>
+                {% endif %}
             </div>
         </section>
 

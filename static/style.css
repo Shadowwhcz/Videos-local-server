@@ -3460,49 +3460,48 @@ footer small {
     position: relative;
     border-radius: 1.2rem;
     overflow: hidden;
+    background:
+        radial-gradient(circle at top, rgba(129, 236, 255, 0.08), transparent 55%),
+        linear-gradient(180deg, rgba(2, 12, 22, 0.96), rgba(2, 8, 16, 0.98));
+    box-shadow: inset 0 0 0 1px rgba(129, 236, 255, 0.08);
+    padding: clamp(1rem, 2vw, 1.6rem);
 }
 
 .player-stage .player-wrapper {
     border-radius: 1.2rem;
     box-shadow: 0 18px 60px rgba(2, 15, 30, 0.6);
+    width: fit-content;
+    max-width: min(100%, 72rem);
+    margin: 0 auto;
 }
 
 .player-shell .player-wrapper video {
-    width: 100%;
+    width: auto;
+    max-width: 100%;
     max-height: 72vh;
     background: #000;
     display: block;
+    margin: 0 auto;
 }
 
-.player-overlay-panel {
-    position: absolute;
-    left: 1rem;
-    right: 1rem;
-    bottom: 1rem;
-    display: flex;
-    justify-content: space-between;
-    gap: 1rem;
-    align-items: flex-end;
-    z-index: 2;
-    pointer-events: none;
-}
-
-.player-overlay-copy,
-.player-overlay-action {
-    pointer-events: auto;
-}
-
-.player-overlay-copy {
-    max-width: min(36rem, 100%);
+.player-stage-footer {
     display: grid;
-    gap: 0.5rem;
-    padding: 1rem 1.1rem;
-    border-radius: 1rem;
-    background: linear-gradient(180deg, rgba(2, 15, 30, 0.44), rgba(2, 15, 30, 0.84));
-    backdrop-filter: blur(16px);
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 1rem;
+    align-items: end;
 }
 
-.player-overlay-kicker {
+.player-stage-summary {
+    display: grid;
+    gap: 0.8rem;
+}
+
+.player-stage-badge {
+    display: grid;
+    gap: 0.35rem;
+}
+
+.player-stage-badge span {
     color: #81ecff;
     font-size: 0.72rem;
     font-weight: 800;
@@ -3510,12 +3509,19 @@ footer small {
     text-transform: uppercase;
 }
 
-.player-overlay-copy strong {
-    font-size: 1.2rem;
-    line-height: 1.2;
+.player-stage-badge strong {
+    font-size: clamp(1.2rem, 1.6vw, 1.8rem);
+    line-height: 1.18;
+    letter-spacing: -0.03em;
 }
 
-.player-overlay-meta span {
+.player-stage-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+}
+
+.player-stage-meta span {
     padding: 0.35rem 0.6rem;
     border-radius: 999px;
     background: rgba(129, 236, 255, 0.12);
@@ -3525,19 +3531,83 @@ footer small {
     text-transform: uppercase;
 }
 
-.player-overlay-action {
+.mobile-fullscreen-btn {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    width: 2.9rem;
+    height: 2.9rem;
+    border: 0;
+    border-radius: 0.95rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(2, 15, 30, 0.55);
+    color: #ffffff;
+    box-shadow:
+        inset 0 0 0 1px rgba(129, 236, 255, 0.12),
+        0 14px 30px rgba(2, 15, 30, 0.45);
+    backdrop-filter: blur(16px);
+    cursor: pointer;
+    z-index: 3;
+}
+
+.mobile-fullscreen-btn:hover {
+    box-shadow:
+        inset 0 0 0 1px rgba(129, 236, 255, 0.2),
+        0 18px 40px rgba(2, 15, 30, 0.6);
+}
+
+.mobile-fullscreen-btn i {
+    font-size: 1.05rem;
+}
+
+.player-wrapper.fullscreen-active {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    border-radius: 0;
+    background: #000;
+    box-shadow: none;
+}
+
+.player-wrapper.fullscreen-active video {
+    width: 100%;
+    height: 100vh;
+    max-height: none;
+    object-fit: contain;
+}
+
+.player-wrapper.fullscreen-active .mobile-fullscreen-btn {
+    top: max(0.75rem, env(safe-area-inset-top));
+    right: max(0.75rem, env(safe-area-inset-right));
+}
+.player-stage-next {
     display: grid;
     gap: 0.3rem;
-    min-width: 13rem;
-    padding: 0.95rem 1rem;
+    min-width: min(18rem, 100%);
+    max-width: 22rem;
+    align-self: stretch;
+    padding: 1rem 1.05rem;
     border-radius: 1rem;
     text-decoration: none;
     background: linear-gradient(135deg, rgba(129, 236, 255, 0.2), rgba(172, 137, 255, 0.18));
     color: #ffffff;
     box-shadow: inset 0 0 0 1px rgba(129, 236, 255, 0.12);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 
-.player-overlay-action span {
+.player-stage-next:hover {
+    transform: translateY(-2px);
+    box-shadow:
+        inset 0 0 0 1px rgba(129, 236, 255, 0.18),
+        0 18px 32px rgba(2, 15, 30, 0.34);
+}
+
+.player-stage-next span {
     color: #81ecff;
     font-size: 0.72rem;
     font-weight: 800;
@@ -3545,7 +3615,7 @@ footer small {
     text-transform: uppercase;
 }
 
-.player-overlay-action strong {
+.player-stage-next strong {
     font-size: 0.95rem;
     line-height: 1.35;
 }
@@ -3691,10 +3761,13 @@ footer small {
         grid-template-columns: 1fr;
     }
 
-    .directory-browser-head,
-    .player-overlay-panel {
+    .directory-browser-head {
         flex-direction: column;
         align-items: stretch;
+    }
+
+    .player-stage-footer {
+        grid-template-columns: 1fr;
     }
 
     .hero-visual {
@@ -3716,6 +3789,11 @@ footer small {
     .library-topbar,
     .player-topbar {
         padding: 0.9rem 1rem;
+    }
+
+    .player-topbar {
+        grid-template-columns: 1fr;
+        gap: 0.7rem;
     }
 
     .library-topbar {
@@ -3871,6 +3949,11 @@ footer small {
         justify-self: start;
     }
 
+    .player-topbar-meta {
+        justify-self: start;
+        gap: 0.55rem;
+    }
+
     .hero-context-chips,
     .directory-state-chips {
         gap: 0.5rem;
@@ -3885,6 +3968,7 @@ footer small {
     }
 
     .player-shell .player-wrapper video {
+        width: 100%;
         max-height: 48vh;
     }
 
@@ -3892,28 +3976,39 @@ footer small {
         display: none;
     }
 
-    .player-overlay-panel {
-        left: 0.75rem;
-        right: 0.75rem;
-        bottom: 0.75rem;
+    .player-stage-media {
+        padding: 0.75rem;
+    }
+
+    .player-stage .player-wrapper {
+        width: 100%;
+        max-width: none;
+    }
+
+    .player-stage-footer {
+        grid-template-columns: 1fr;
         gap: 0.75rem;
     }
 
-    .player-overlay-copy,
-    .player-overlay-action {
-        padding: 0.85rem 0.9rem;
-        border-radius: 0.9rem;
-    }
-
-    .player-overlay-copy strong {
+    .player-stage-badge strong {
         font-size: 1rem;
     }
 
-    .player-overlay-meta span {
-        font-size: 0.68rem;
+    .player-stage-meta {
+        gap: 0.45rem;
     }
 
-    .player-overlay-action {
+    .player-stage-meta span {
+        font-size: 0.68rem;
+        letter-spacing: 0.04em;
+        max-width: 100%;
+    }
+
+    .player-stage-next {
         min-width: 0;
+    }
+
+    .shortcuts-panel {
+        display: none;
     }
 }

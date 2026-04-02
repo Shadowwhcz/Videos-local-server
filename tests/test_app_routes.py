@@ -143,6 +143,8 @@ def test_play_renders_player_shell(client: AppClient):
     assert "Episode 3.mp4" in response.text
     assert "正在播放" in response.text
     assert "跳到下一条" in response.text
+    assert "player-stage-footer" in response.text
+    assert 'id="mobileFullscreenBtn"' in response.text
 
 
 def test_play_renders_current_folder_browse_link(client: AppClient):
