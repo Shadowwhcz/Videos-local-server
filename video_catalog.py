@@ -13,6 +13,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
+try:
+    from passlib.context import CryptContext
+
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    HAS_BCRYPT = True
+except ImportError:
+    pwd_context = None
+    HAS_BCRYPT = False
+
 
 def get_video_id(video_path: str) -> str:
     return hashlib.md5(video_path.encode("utf-8")).hexdigest()[:16]
@@ -86,6 +95,19 @@ class VideoServer:
         exts_str = self.config.get("video", "extensions", fallback="mp4,mkv,avi,mov,wmv,flv,webm,m4v")
         self.extensions = set(f'.{e.strip().lower().lstrip(".")}' for e in exts_str.split(","))
         self.videos_per_page = self.config.getint("ui", "videos_per_page", fallback=30)
+
+    def _is_hashed_password(self, password: str) -> bool:
+        if not HAS_BCRYPT:
+            return False
+        return password.startswith("$2a$") or password.startswith("$2b$") or password.startswith("$2y$")
+
+    def verify_password(self, plain_password: str) -> bool:
+        if HAS_BCRYPT and self._is_hashed_password(self.auth_password):
+            try:
+                return pwd_context.verify(plain_password, self.auth_password)
+            except Exception:
+                return False
+        return plain_password == self.auth_password
 
     def get_directories(self) -> list[dict]:
         now = time.time()

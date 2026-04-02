@@ -56,7 +56,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 # 初始化全局 Session 管理器
 SESSION_STORAGE_DIR = BASE_DIR / "sessions"
-session_manager = SessionManager(storage_dir=SESSION_STORAGE_DIR)
+session_manager = SessionManager(storage_dir=SESSION_STORAGE_DIR, secret_key=_secret_key)
 
 THUMBNAIL_DIR = BASE_DIR / "thumbnails"
 THUMBNAIL_DIR.mkdir(exist_ok=True)
@@ -343,7 +343,7 @@ async def login(
     """处理登录"""
     remember_me = remember == "on"  # 复选框选中时值为 "on"
     
-    if username == video_server.auth_username and password == video_server.auth_password:
+    if username == video_server.auth_username and video_server.verify_password(password):
         # 获取设备信息（User-Agent）
         device_info = request.headers.get("user-agent", "Unknown")[:200]
         
