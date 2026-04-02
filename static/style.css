@@ -66,6 +66,8 @@ html {
     overflow-y: auto;
     /* iOS平滑滚动 */
     -webkit-overflow-scrolling: touch;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 
 body {
@@ -3830,12 +3832,32 @@ footer small {
     .hero-copy h1,
     .hero-empty h1,
     .player-stage-copy h1 {
-        font-size: 2.2rem;
+        font-size: clamp(22px, 7vw, 34px);
+        line-height: 1.06;
+        letter-spacing: -0.04em;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        display: -webkit-box;
+        line-clamp: 3;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
     }
 
     .hero-actions {
         display: grid;
         grid-template-columns: 1fr;
+    }
+
+    .hero-visual {
+        justify-content: stretch;
+    }
+
+    .hero-poster-frame {
+        width: 100%;
+        min-height: 0;
+        aspect-ratio: 16 / 9;
+        max-height: 42vh;
     }
 
     .toolbar-stats,
@@ -3844,6 +3866,20 @@ footer small {
     .directory-browser-head {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .toolbar-stats,
+    .library-section-head span {
+        width: 100%;
+        gap: 0.4rem;
+        font-size: 0.74rem;
+        letter-spacing: 0.08em;
+    }
+
+    .toolbar-stats span,
+    .library-section-head span {
+        min-width: 0;
+        white-space: normal;
     }
 
     .directory-jump-link {
@@ -3905,31 +3941,49 @@ footer small {
         grid-template-columns: 1fr;
     }
 
-    .curated-shelf-grid {
-        display: flex;
-        overflow-x: auto;
-        scroll-snap-type: x mandatory;
-        padding-bottom: 0.25rem;
-    }
-
-    .curated-shelf-card,
-    .curated-shelf-empty {
-        flex: 0 0 min(84vw, 20rem);
-        scroll-snap-align: start;
-    }
-
     .curated-shelf-card {
-        grid-template-columns: 6.25rem 1fr;
-        min-height: 7rem;
+        grid-template-columns: minmax(5.75rem, 30vw) minmax(0, 1fr);
+        min-height: 6.5rem;
+        padding: 0.75rem;
     }
 
     .curated-shelf-copy strong {
-        font-size: 0.9rem;
+        font-size: 0.88rem;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        display: -webkit-box;
+        line-clamp: 3;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
     }
 
     .curated-shelf-copy span,
     .curated-shelf-copy small {
         font-size: 0.72rem;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    .curated-shelf-copy span {
+        display: -webkit-box;
+        line-clamp: 2;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .curated-shelf-thumb {
+        min-height: 5.5rem;
+        aspect-ratio: 1 / 1;
+    }
+
+    .curated-shelf-empty {
+        min-height: 6rem;
+        align-items: flex-start;
+        white-space: normal;
     }
 
     .library-tool-btn {
