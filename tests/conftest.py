@@ -138,7 +138,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(
         app_module.video_server,
         "get_directories",
-        lambda: [{"name": "Library", "path": library_root, "video_count": len(fake_videos)}],
+        lambda cached_only=False: [{"name": "Library", "path": library_root, "video_count": len(fake_videos)}],
     )
     monkeypatch.setattr(
         app_module.video_server,
@@ -165,6 +165,9 @@ def client(tmp_path, monkeypatch):
         "refresh_scan_cache",
         lambda: refresh_tracker.__setitem__("calls", refresh_tracker["calls"] + 1),
     )
+    monkeypatch.setattr(app_module.video_server, "has_usable_scan_cache", lambda: True)
+    monkeypatch.setattr(app_module.video_server, "ensure_background_scan", lambda: False)
+    monkeypatch.setattr(app_module.video_server, "is_background_scan_running", lambda: False)
 
     client = AppClient(app_module.app)
     client.refresh_tracker = refresh_tracker

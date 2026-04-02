@@ -1,4 +1,5 @@
 from conftest import AppClient
+import app as app_module
 
 
 def test_index_renders_video_library_shell(client: AppClient):
@@ -72,6 +73,34 @@ def test_index_renders_curated_shelves(client: AppClient):
     assert "最近入库" in response.text
 
 
+def test_index_defers_initial_scan_with_loading_state(client: AppClient, monkeypatch):
+    tracker = {"started": 0}
+    monkeypatch.setattr(app_module.video_server, "has_usable_scan_cache", lambda: False)
+    monkeypatch.setattr(
+        app_module.video_server,
+        "get_directories",
+        lambda cached_only=False: [{"name": "Library", "path": "/library", "video_count": 0}],
+    )
+    monkeypatch.setattr(
+        app_module.video_server,
+        "ensure_background_scan",
+        lambda: tracker.__setitem__("started", tracker["started"] + 1) or True,
+    )
+    monkeypatch.setattr(app_module.video_server, "is_background_scan_running", lambda: True)
+    monkeypatch.setattr(
+        app_module.video_server,
+        "scan_videos",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not scan synchronously")),
+    )
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "正在读取片库" in response.text
+    assert "data-library-loading=\"true\"" in response.text
+    assert tracker["started"] == 1
+
+
 def test_index_renders_clear_filters_when_context_is_active(client: AppClient):
     response = client.get("/?search=sample&browse=/library&dir_path=Season%201")
     assert response.status_code == 200
@@ -129,8 +158,22 @@ def test_play_prioritizes_same_folder_next_up(client: AppClient):
     assert "Episode 4.mp4" in response.text
 
 
-def test_play_renders_resolution_in_details(client: AppClient):
+def test_play_does_not_block_on_video_info_lookup(client: AppClient, monkeypatch):
+    monkeypatch.setattr(
+        app_module.video_server,
+        "get_video_info",
+        lambda path: (_ for _ in ()).throw(AssertionError("play route should not call get_video_info synchronously")),
+    )
+
+    response = client.get("/play/video-1")
+
+    assert response.status_code == 200
+
+
+def test_play_renders_async_metadata_placeholders(client: AppClient):
     response = client.get("/play/video-1")
     assert response.status_code == 200
     assert "分辨率" in response.text
-    assert "1920x1080" in response.text
+    assert 'class="js-player-resolution"' in response.text
+    assert 'class="js-player-duration"' in response.text
+    assert ">--<" in response.text
