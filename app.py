@@ -395,7 +395,14 @@ async def index(
         return RedirectResponse(url="/login", status_code=302)
 
     initial_scan_pending = not search and not browse and not dir_path and not video_server.has_usable_scan_cache()
-    directories = video_server.get_directories(cached_only=initial_scan_pending)
+
+    def load_directories(cached_only: bool) -> list[dict]:
+        try:
+            return video_server.get_directories(cached_only=cached_only)
+        except TypeError:
+            return video_server.get_directories()
+
+    directories = load_directories(initial_scan_pending)
     current_user = get_actor_name(request)
 
     def enrich_video(video: dict) -> dict:
