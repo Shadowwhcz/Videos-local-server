@@ -12,7 +12,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css" rel="stylesheet">
     <link href="/static/style.css" rel="stylesheet">
 </head>
-<body class="media-library-shell">
+<body class="media-library-shell" {% if is_loading %}data-library-loading="true"{% endif %}>
     <div class="cyber-noise"></div>
     <div class="cyber-orb cyber-orb-a"></div>
     <div class="cyber-orb cyber-orb-b"></div>
@@ -65,7 +65,13 @@
 
     <main class="library-canvas">
         <section class="hero-spotlight {% if not featured_video %}is-empty{% endif %}">
-            {% if featured_video %}
+            {% if is_loading %}
+            <div class="hero-empty hero-loading">
+                <p class="hero-kicker">启动预热</p>
+                <h1>正在读取片库</h1>
+                <p class="hero-description">当前正在后台建立视频索引。首次加载完成后，这里会自动切换成正常片库首页。</p>
+            </div>
+            {% elif featured_video %}
             <div class="hero-copy">
                 <p class="hero-kicker">{% if directory_browse_mode %}目录视图{% else %}继续观看{% endif %}</p>
                 <h1>{{ featured_video.name }}</h1>
@@ -298,7 +304,14 @@
                 <span>{% if search %}搜索结果{% else %}最新入库{% endif %}</span>
             </div>
 
-            {% if videos %}
+            {% if is_loading %}
+            <div class="library-loading-state">
+                <div class="library-loading-spinner"></div>
+                <h4>正在读取片库</h4>
+                <p>视频目录正在后台扫描中。页面会自动刷新，你现在不需要重新登录。</p>
+                <a class="empty-state-action" href="/">手动刷新</a>
+            </div>
+            {% elif videos %}
             <div class="video-grid cyber-video-grid" data-preview-enabled="true">
                 {% for video in videos %}
                 <div class="video-card-wrapper" data-video-id="{{ video.id }}" data-video-name="{{ video.name }}">

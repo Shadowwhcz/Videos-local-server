@@ -393,8 +393,9 @@ async def index(
     # 认证检查
     if video_server.auth_enabled and not get_current_user(request):
         return RedirectResponse(url="/login", status_code=302)
-    
-    directories = video_server.get_directories()
+
+    initial_scan_pending = not search and not browse and not dir_path and not video_server.has_usable_scan_cache()
+    directories = video_server.get_directories(cached_only=initial_scan_pending)
     current_user = get_actor_name(request)
 
     def enrich_video(video: dict) -> dict:
@@ -600,6 +601,56 @@ async def index(
                 {"label": "当前视频数", "value": str(total_items)},
             ],
         }
+
+    if initial_scan_pending:
+        video_server.ensure_background_scan()
+        return templates.TemplateResponse(
+            request,
+            "index.html",
+            {
+                "directories": directories,
+                "videos": [],
+                "featured_video": None,
+                "continue_video": None,
+                "recent_videos": [],
+                "search": "",
+                "page": 1,
+                "total_pages": 0,
+                "total": 0,
+                "current_user": current_user,
+                "current_browse": "",
+                "current_path": "",
+                "directory_browse_mode": False,
+                "pagination": None,
+                "library_insights": [
+                    {"label": "当前可见", "value": "0", "meta": "等待索引"},
+                    {"label": "片库数量", "value": str(len(directories)), "meta": "已连接片库"},
+                    {"label": "当前模式", "value": "启动中", "meta": "后台扫描"},
+                    {"label": "当前用户", "value": current_user, "meta": "首次加载"},
+                ],
+                "context_chips": ["首次加载", "后台扫描", "0 Videos"],
+                "spotlight_lane": {
+                    "title": "片库索引构建中",
+                    "detail": "当前正在后台读取视频目录，完成后页面会自动刷新。",
+                    "count": 0,
+                },
+                "curated_shelves": [],
+                "directory_snapshot": build_directory_snapshot(0, False),
+                "view_feedback": {
+                    "kicker": "启动预热",
+                    "title": "正在读取片库",
+                    "detail": "首次加载会在后台建立索引，避免登录后直接卡住。",
+                },
+                "empty_state": {
+                    "title": "片库正在准备中",
+                    "detail": "索引完成后会自动刷新显示视频列表。",
+                    "action_label": "立即重试",
+                    "action_href": "/",
+                },
+                "hero_browse_href": build_default_browse_href(),
+                "is_loading": True,
+            }
+        )
     
     # 如果指定了浏览目录
     if browse:

@@ -57,6 +57,7 @@ document.addEventListener('DOMContentLoaded', function() {
         initPlayer();
 
         if (document.querySelector('.media-library-shell')) {
+            initLibraryLoadingState();
             initSearch();
             initLibraryActions();
             initContinueWatchingShelf();
@@ -81,6 +82,13 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 });
+
+function initLibraryLoadingState() {
+    if (document.body.dataset.libraryLoading !== 'true') return;
+    window.setTimeout(() => {
+        window.location.reload();
+    }, 2500);
+}
 
 /**
  * 加载配置

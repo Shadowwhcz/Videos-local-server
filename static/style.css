@@ -2639,6 +2639,10 @@ footer small {
     letter-spacing: -0.05em;
 }
 
+.hero-loading {
+    border-style: solid;
+}
+
 .hero-description,
 .player-stage-copy p {
     margin: 1rem 0 0;
@@ -3297,6 +3301,48 @@ footer small {
 .library-empty-state i {
     font-size: 2.5rem;
     color: #81ecff;
+}
+
+.library-loading-state {
+    display: grid;
+    justify-items: center;
+    gap: 0.85rem;
+    text-align: center;
+    padding: 2.75rem 1.5rem;
+    border-radius: 1.5rem;
+    color: #9eacc0;
+    background: rgba(8, 27, 44, 0.72);
+    box-shadow: inset 0 0 0 1px rgba(129, 236, 255, 0.12);
+}
+
+.library-loading-state h4 {
+    margin: 0;
+    color: #ecfdff;
+    font-size: 1.15rem;
+}
+
+.library-loading-state p {
+    margin: 0;
+    max-width: 34rem;
+}
+
+.library-loading-spinner {
+    width: 3.25rem;
+    height: 3.25rem;
+    border-radius: 50%;
+    border: 3px solid rgba(129, 236, 255, 0.18);
+    border-top-color: #5af6ff;
+    box-shadow: 0 0 24px rgba(90, 246, 255, 0.2);
+    animation: library-spin 0.9s linear infinite;
+}
+
+@keyframes library-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .empty-state-action {

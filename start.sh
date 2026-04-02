@@ -31,6 +31,7 @@ echo "📥 检查依赖..."
 pip install -q --upgrade pip
 pip install -q -r requirements.txt
 
-# 启动服务（多worker模式，提升并发处理能力）
-echo "🚀 启动视频服务器 (4 workers)..."
-uvicorn app:app --host 0.0.0.0 --port 8000 --workers 4
+# 外接硬盘场景下，多 worker 会放大目录扫描和 IO 竞争；默认使用单 worker
+WORKERS="${VIDEO_SERVER_WORKERS:-1}"
+echo "🚀 启动视频服务器 (${WORKERS} workers)..."
+uvicorn app:app --host 0.0.0.0 --port 8000 --workers "$WORKERS"

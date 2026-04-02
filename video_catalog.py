@@ -73,6 +73,8 @@ class VideoServer:
         self.cache_validation_cache_scanned_at = 0.0
         self.cache_validation_result = False
         self.cache_validate_interval_seconds = 5
+        self.background_scan_lock = threading.Lock()
+        self.background_scan_thread: threading.Thread | None = None
 
         dirs_str = self.config.get("video", "directories", fallback="~/Movies")
         self.video_dirs = []
@@ -109,12 +111,22 @@ class VideoServer:
                 return False
         return plain_password == self.auth_password
 
-    def get_directories(self) -> list[dict]:
+    def get_directories(self, cached_only: bool = False) -> list[dict]:
         now = time.time()
         with self.directories_cache_lock:
-            if self.directories_cache and (now - self.directories_cache_built_at) < self.directories_cache_ttl_seconds:
+            if (
+                not cached_only
+                and self.directories_cache
+                and (now - self.directories_cache_built_at) < self.directories_cache_ttl_seconds
+            ):
                 return list(self.directories_cache)
-        all_videos = self.scan_videos(use_cache=True)
+
+        if cached_only:
+            with self.scan_cache_lock:
+                cache = self._load_scan_cache()
+                all_videos = self._ensure_video_ids(cache.get("videos", []))
+        else:
+            all_videos = self.scan_videos(use_cache=True)
         counts: dict[str, int] = {}
         for video in all_videos:
             base_dir = video.get("base_dir")
@@ -126,9 +138,10 @@ class VideoServer:
             name = self.video_dir_names.get(d, os.path.basename(d))
             video_count = counts.get(d, 0)
             dirs.append({"name": name, "path": d, "video_count": video_count})
-        with self.directories_cache_lock:
-            self.directories_cache = dirs
-            self.directories_cache_built_at = now
+        if not cached_only:
+            with self.directories_cache_lock:
+                self.directories_cache = dirs
+                self.directories_cache_built_at = now
         return dirs
 
     def _count_videos(self, directory: str) -> int:
@@ -345,6 +358,27 @@ class VideoServer:
             self.cache_validation_checked_at = now
             self.cache_validation_result = is_valid
         return is_valid
+
+    def has_usable_scan_cache(self) -> bool:
+        with self.scan_cache_lock:
+            cache = self._load_scan_cache()
+        return self._is_cache_valid(cache)
+
+    def is_background_scan_running(self) -> bool:
+        with self.background_scan_lock:
+            return bool(self.background_scan_thread and self.background_scan_thread.is_alive())
+
+    def ensure_background_scan(self) -> bool:
+        with self.background_scan_lock:
+            if self.background_scan_thread and self.background_scan_thread.is_alive():
+                return False
+
+            def _scan():
+                self.refresh_scan_cache()
+
+            self.background_scan_thread = threading.Thread(target=_scan, daemon=True)
+            self.background_scan_thread.start()
+            return True
 
     def scan_videos(self, search: str = "", directory: str = None, use_cache: bool = True) -> list[dict]:
         dirs_to_scan = [directory] if directory else self.video_dirs
