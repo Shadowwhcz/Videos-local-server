@@ -56,7 +56,7 @@
                             <div class="player-overlay-meta">
                                 <span>{{ video.parent_dir or "片库根目录" }}</span>
                                 <span>{{ video.modified }}</span>
-                                <span>{{ video.duration_formatted or "--:--" }}</span>
+                                <span class="js-player-duration">{{ video.duration_formatted or "--:--" }}</span>
                             </div>
                         </div>
                         {% if jump_to_next %}
@@ -97,12 +97,12 @@
                     <div class="detail-item">
                         <i class="bi bi-clock-history"></i>
                         <span>时长</span>
-                        <strong>{{ video.duration_formatted or "--:--" }}</strong>
+                        <strong class="js-player-duration">{{ video.duration_formatted or "--:--" }}</strong>
                     </div>
                     <div class="detail-item">
                         <i class="bi bi-badge-hd"></i>
                         <span>分辨率</span>
-                        <strong>{{ video.resolution or "--" }}</strong>
+                        <strong class="js-player-resolution">{{ video.resolution or "--" }}</strong>
                     </div>
                     <div class="detail-item">
                         <i class="bi bi-folder2-open"></i>

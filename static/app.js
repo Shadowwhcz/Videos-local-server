@@ -477,6 +477,23 @@ function updateDurationDisplay(element, duration) {
     }
 }
 
+function formatDuration(seconds) {
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+        return '--:--';
+    }
+
+    const totalSeconds = Math.floor(seconds);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const remainingSeconds = totalSeconds % 60;
+
+    if (hours > 0) {
+        return `${hours}:${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+    }
+
+    return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
+}
+
 /**
  * 获取视频信息API
  */
@@ -495,8 +512,29 @@ function initPlayer() {
     const video = document.getElementById('videoPlayer');
     const mobileFullscreenBtn = document.getElementById('mobileFullscreenBtn');
     const playerWrapper = document.getElementById('playerWrapper');
+    const durationTargets = document.querySelectorAll('.js-player-duration');
+    const resolutionTargets = document.querySelectorAll('.js-player-resolution');
     
     if (!video) return;
+
+    const updatePlayerMetadata = () => {
+        if (video.duration && Number.isFinite(video.duration)) {
+            const formattedDuration = formatDuration(video.duration);
+            durationTargets.forEach(el => {
+                el.textContent = formattedDuration;
+            });
+            localStorage.setItem(`video_duration_${video.dataset.videoId}`, formattedDuration);
+            localStorage.setItem(`video_duration_seconds_${video.dataset.videoId}`, video.duration);
+            localStorage.setItem(`video_duration_${video.dataset.videoId}_time`, Date.now().toString());
+        }
+
+        if (video.videoWidth && video.videoHeight) {
+            const resolution = `${video.videoWidth}x${video.videoHeight}`;
+            resolutionTargets.forEach(el => {
+                el.textContent = resolution;
+            });
+        }
+    };
     
     // 从本地存储恢复播放位置
     const savedPosition = localStorage.getItem(`video_pos_${video.dataset.videoId}`);
@@ -505,9 +543,7 @@ function initPlayer() {
     }
 
     video.addEventListener('loadedmetadata', function() {
-        if (video.duration && Number.isFinite(video.duration)) {
-            localStorage.setItem(`video_duration_seconds_${video.dataset.videoId}`, video.duration);
-        }
+        updatePlayerMetadata();
     });
     
     // 定期保存播放位置

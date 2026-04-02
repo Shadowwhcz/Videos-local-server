@@ -458,11 +458,20 @@ class VideoServer:
 
     def scan_videos(self, search: str = "", directory: str = None, use_cache: bool = True) -> list[dict]:
         dirs_to_scan = [directory] if directory else self.video_dirs
-        if use_cache and not search and not directory:
+        if use_cache:
             with self.scan_cache_lock:
                 cache = self._load_scan_cache()
                 if self._is_cache_valid(cache):
-                    return self._ensure_video_ids(cache.get("videos", []))
+                    cached_videos = self._ensure_video_ids(cache.get("videos", []))
+                    if not search and not directory:
+                        return cached_videos
+                    normalized_search = search.lower()
+                    return [
+                        video
+                        for video in cached_videos
+                        if (not directory or video.get("base_dir") == directory)
+                        and (not normalized_search or normalized_search in video.get("name", "").lower())
+                    ]
 
         videos = []
         for base_dir in dirs_to_scan:
@@ -598,6 +607,7 @@ class VideoServer:
             "duration_formatted": None,
             "width": None,
             "height": None,
+            "resolution": None,
             "codec": None,
             "bitrate": None,
             "fps": None,
@@ -614,7 +624,7 @@ class VideoServer:
                         and cached.get("size") == stat.st_size
                         and (now - cached.get("checked_at", 0)) < self.video_info_cache_ttl_seconds
                     ):
-                        return dict(cached.get("info", info))
+                        return self._normalize_video_info(dict(cached.get("info", info)))
         except OSError:
             return info
         try:
@@ -654,7 +664,15 @@ class VideoServer:
             pass
         else:
             self._persist_video_info_cache()
-        return info
+        return self._normalize_video_info(info)
+
+    def _normalize_video_info(self, info: dict) -> dict:
+        normalized = dict(info)
+        width = normalized.get("width")
+        height = normalized.get("height")
+        if width and height and not normalized.get("resolution"):
+            normalized["resolution"] = f"{width}x{height}"
+        return normalized
 
     def _format_duration(self, seconds: float) -> str:
         hours = int(seconds // 3600)

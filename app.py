@@ -754,10 +754,7 @@ async def play(request: Request, video_id: str):
     video = video_server.get_video_by_id(video_id)
     if not video:
         raise HTTPException(status_code=404, detail="视频不存在")
-    
-    # 获取视频详细信息
-    video_info = video_server.get_video_info(video['path'])
-    video.update(video_info)
+
     video['id'] = video_id
 
     same_folder_videos = []
