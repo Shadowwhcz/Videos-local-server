@@ -119,6 +119,15 @@ class VideoServer:
                 return False
         return plain_password == self.auth_password
 
+    def _should_ignore_filename(self, filename: str) -> bool:
+        if not filename:
+            return True
+        if filename == ".DS_Store":
+            return True
+        if filename.startswith("._"):
+            return True
+        return False
+
     def get_directories(self, cached_only: bool = False) -> list[dict]:
         now = time.time()
         with self.directories_cache_lock:
@@ -157,6 +166,8 @@ class VideoServer:
         try:
             for root, _, files in os.walk(directory):
                 for f in files:
+                    if self._should_ignore_filename(f):
+                        continue
                     if os.path.splitext(f)[1].lower() in self.extensions:
                         count += 1
         except Exception:
@@ -268,6 +279,8 @@ class VideoServer:
                     if self._has_videos_recursive(item_path):
                         subfolder_count += 1
                 elif os.path.isfile(item_path):
+                    if self._should_ignore_filename(item):
+                        continue
                     if os.path.splitext(item)[1].lower() in self.extensions and not self.is_temp_file(item_path):
                         video_count += 1
         except Exception:
@@ -281,7 +294,11 @@ class VideoServer:
             for item in os.listdir(directory):
                 item_path = os.path.join(directory, item)
                 if os.path.isfile(item_path):
+                    if self._should_ignore_filename(item):
+                        continue
                     if os.path.splitext(item)[1].lower() in self.extensions:
+                        if self.is_temp_file(item_path):
+                            continue
                         return True
                 elif os.path.isdir(item_path):
                     if self._has_videos_recursive(item_path, max_depth - 1):
@@ -479,6 +496,8 @@ class VideoServer:
                 continue
             for root, _, files in os.walk(base_dir):
                 for file in files:
+                    if self._should_ignore_filename(file):
+                        continue
                     ext = os.path.splitext(file)[1].lower()
                     if ext not in self.extensions:
                         continue

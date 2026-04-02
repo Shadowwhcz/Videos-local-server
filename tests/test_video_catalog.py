@@ -138,6 +138,19 @@ def test_refresh_scan_cache_persists_full_library_scan(tmp_path):
     assert cache["videos"][0]["name"] == "Feature.mp4"
 
 
+def test_scan_videos_ignores_macos_appledouble_and_ds_store(tmp_path):
+    server, media_root = _build_server(tmp_path)
+    (media_root / "Feature.mp4").write_bytes(b"video")
+    (media_root / "._Feature.mp4").write_bytes(b"not-a-video")
+    (media_root / ".DS_Store").write_bytes(b"metadata")
+
+    server.refresh_scan_cache()
+    videos = server.scan_videos(use_cache=True)
+
+    assert [video["name"] for video in videos] == ["Feature.mp4"]
+    assert server.get_directories()[0]["video_count"] == 1
+
+
 def test_scan_videos_filters_directory_queries_from_valid_cache(tmp_path, monkeypatch):
     server, media_root = _build_server(tmp_path)
     other_root = tmp_path / "movies"
