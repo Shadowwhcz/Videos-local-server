@@ -97,8 +97,9 @@ def check_video_status(video_path: str) -> dict:
         return {"status": "corrupted", "reason": "文件不存在"}
     if is_temp_file(video_path):
         return {"status": "downloading", "reason": "临时文件"}
-    if is_file_locked(video_path):
-        return {"status": "downloading", "reason": "文件被占用"}
+    # 跳过 lsof 检查 — 对移动硬盘不可靠且延迟高（bug 1.6 修复）
+    # is_file_locked() 依赖 lsof 子进程，在外接硬盘上延迟显著
+    # 仍保留 is_file_growing() 作为下载检测的替代手段
     if is_file_growing(video_path):
         return {"status": "downloading", "reason": "正在写入"}
     try:
@@ -114,7 +115,8 @@ def check_video_status(video_path: str) -> dict:
             "json",
             video_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        # ffprobe 超时从 10 秒降低到 5 秒，减少移动硬盘上的延迟（bug 1.6 修复）
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
         if result.returncode != 0:
             return {"status": "corrupted", "reason": "无法读取视频流"}
         data = json.loads(result.stdout)
@@ -148,7 +150,8 @@ def check_single_video_integrity(video_path: str) -> dict:
             "json",
             video_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        # ffprobe 超时从 15 秒降低到 8 秒，减少移动硬盘上的延迟（bug 1.6 修复）
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
         if result.returncode != 0:
             error_msg = result.stderr.strip() if result.stderr else "无法读取视频信息"
             return {"valid": False, "error": error_msg[:100]}

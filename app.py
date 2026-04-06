@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from urllib.parse import unquote, urlencode
 import threading
 import time
+import concurrent.futures
 import asyncio
 from contextlib import asynccontextmanager
 from functools import lru_cache
@@ -39,7 +40,7 @@ from video_health import (
 
 # ==================== 性能优化配置 ====================
 # 流媒体优化参数（针对外接硬盘优化）
-STREAM_CHUNK_SIZE = 4 * 1024 * 1024  # 4MB 基础块大小（从1MB增加）
+STREAM_CHUNK_SIZE = 1 * 1024 * 1024  # 1MB 基础块大小（适配移动硬盘 I/O 特性，减少单次读取等待时间）
 STREAM_PREFETCH_SIZE = 16 * 1024 * 1024  # 16MB 预读缓冲区
 FILE_HANDLE_CACHE_SIZE = 32  # 缓存的文件句柄数量
 FILE_HANDLE_TTL = 300  # 文件句柄缓存时间（秒）
@@ -411,30 +412,22 @@ class PrefetchBuffer:
     
     def _prefetch(self):
         """后台预读数据"""
+        handle = None
         try:
-            # 尝试使用缓存的文件句柄
-            handle = file_handle_cache.get(self.file_path)
-            own_handle = False
-            
-            if handle is None:
-                handle = open(self.file_path, 'rb')
-                own_handle = True
-            
-            try:
-                handle.seek(self.start_pos)
-                data = handle.read(self.prefetch_size)
-                self.buffer.extend(data)
-                
-                # 如果是自己打开的，缓存起来
-                if own_handle:
-                    file_handle_cache.put(self.file_path, handle)
-            finally:
-                # 如果是自己打开的且没有缓存，则关闭
-                if own_handle and not file_handle_cache.get(self.file_path):
-                    handle.close()
+            # 始终打开独立句柄，避免与主线程共享 seek 位置
+            handle = open(self.file_path, 'rb')
+            handle.seek(self.start_pos)
+            data = handle.read(self.prefetch_size)
+            self.buffer.extend(data)
         except Exception as e:
             self.error = e
         finally:
+            # 直接关闭自行打开的句柄，不缓存到全局缓存
+            if handle is not None:
+                try:
+                    handle.close()
+                except Exception:
+                    pass
             self.done.set()
     
     def get_data(self, timeout: float = 2.0) -> Optional[bytes]:
@@ -959,6 +952,24 @@ async def play(request: Request, video_id: str):
         record_monitor_event("play_page_missing_video", level="error", request=request, video_id=video_id)
         raise HTTPException(status_code=404, detail="视频不存在")
 
+    # 检查文件大小是否为 0 字节
+    zero_byte_error = False
+    try:
+        file_path = video.get("path", "")
+        if file_path and os.path.exists(file_path):
+            file_stat = os.stat(file_path)
+            if file_stat.st_size == 0:
+                zero_byte_error = True
+                record_monitor_event(
+                    "play_page_zero_byte_video",
+                    level="warning",
+                    request=request,
+                    video_id=video_id,
+                    video_name=video.get("name"),
+                )
+    except OSError:
+        pass
+
     video['id'] = video_id
     record_monitor_event(
         "play_page_opened",
@@ -1007,6 +1018,7 @@ async def play(request: Request, video_id: str):
             "player_back_label": player_back_label,
             "library_browse_href": library_browse_href,
             "library_browse_label": "浏览当前目录" if browse_path else "浏览片库根目录",
+            "zero_byte_error": zero_byte_error,
         }
     )
 
@@ -1096,6 +1108,18 @@ async def stream_video(video_id: str, request: Request):
         raise HTTPException(status_code=404, detail="视频不存在")
 
     file_size = stat.st_size
+
+    # 0 字节文件无法播放，返回 422 错误
+    if file_size == 0:
+        record_monitor_event(
+            "stream_zero_byte_video",
+            level="warning",
+            request=request,
+            video_id=video_id,
+            video_name=os.path.basename(video_path),
+        )
+        raise HTTPException(status_code=422, detail="视频文件为空，无法播放")
+
     mime_type = get_mime_type(video_path)
     etag = f'"{stat.st_mtime}-{stat.st_size}"'
     video_name = os.path.basename(video_path)
@@ -1164,30 +1188,51 @@ async def stream_video(video_id: str, request: Request):
         content_length = end - start + 1
         
         def iterfile_optimized():
-            """优化的文件迭代器，支持预读缓冲"""
+            """优化的文件迭代器，使用 PrefetchBuffer 后台预读下一块数据"""
             f = None
+            prefetcher = None
             try:
                 f = open_file_with_cache(video_path)
                 f.seek(start)
                 remaining = content_length
                 chunk_size = STREAM_CHUNK_SIZE
-                
-                # 预读第一块数据（同步读取，确保立即可用）
-                first_chunk_size = min(chunk_size * 2, remaining)  # 首次读取更大块
-                data = f.read(first_chunk_size)
-                if data:
-                    remaining -= len(data)
-                    yield data
-                
-                # 继续读取剩余数据
+                current_pos = start
+
                 while remaining > 0:
                     read_size = min(chunk_size, remaining)
+
+                    # 计算下一块的预读位置和大小
+                    next_pos = current_pos + read_size
+                    next_remaining = remaining - read_size
+                    next_prefetch_size = min(chunk_size, next_remaining) if next_remaining > 0 else 0
+
+                    # 在读取当前块之前，启动 PrefetchBuffer 预读下一块
+                    if next_prefetch_size > 0:
+                        prefetcher = PrefetchBuffer(video_path, next_pos, next_prefetch_size)
+                        prefetcher.start()
+                    else:
+                        prefetcher = None
+
+                    # 同步读取当前块
                     data = f.read(read_size)
                     if not data:
                         break
                     remaining -= len(data)
+                    current_pos += len(data)
                     yield data
-                
+
+                    # 如果有预读器，尝试使用预读数据作为下一块
+                    if prefetcher is not None and remaining > 0:
+                        prefetch_data = prefetcher.get_data(timeout=2.0)
+                        if prefetch_data:
+                            # 预读成功，直接使用预读数据，跳过同步读取
+                            remaining -= len(prefetch_data)
+                            current_pos += len(prefetch_data)
+                            # 同步文件句柄位置到预读数据之后
+                            f.seek(current_pos)
+                            yield prefetch_data
+                        prefetcher = None
+
             except Exception as e:
                 record_monitor_event(
                     "stream_iterator_error",
@@ -1592,13 +1637,20 @@ async def batch_check_video_status(request: Request):
     results = {}
     target_ids = video_ids[:50]
     video_paths = video_server.get_video_paths(target_ids)
-    
-    for video_id in target_ids:
+
+    # 定义单个视频的检查函数，供线程池并发调用
+    def _check_one(video_id: str) -> tuple[str, dict]:
         video_path = video_paths.get(video_id)
         if video_path:
-            results[video_id] = check_video_status(video_path)
-        else:
-            results[video_id] = {"status": "corrupted", "reason": "视频不存在"}
+            return video_id, check_video_status(video_path)
+        return video_id, {"status": "corrupted", "reason": "视频不存在"}
+
+    # 使用线程池并发执行批量检查，max_workers=8 限制并发上限
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(_check_one, vid): vid for vid in target_ids}
+        for future in concurrent.futures.as_completed(futures):
+            video_id, status = future.result()
+            results[video_id] = status
     
     return {"results": results}
 

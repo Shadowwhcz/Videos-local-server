@@ -443,7 +443,9 @@ class VideoServer:
         for base_dir in self.video_dirs:
             current_mtime = self._get_top_dir_mtime(base_dir)
             cached_mtime = cached_mtimes.get(base_dir, 0)
-            if current_mtime > cached_mtime:
+            # exFAT 文件系统的 mtime 精度为 2 秒，严格比较会导致频繁误判缓存失效
+            # 增加 2 秒容错窗口，避免因文件系统精度不足触发不必要的全量重扫
+            if current_mtime > cached_mtime + 2:
                 is_valid = False
                 break
         with self.cache_validation_lock:
@@ -479,6 +481,7 @@ class VideoServer:
             with self.scan_cache_lock:
                 cache = self._load_scan_cache()
                 if self._is_cache_valid(cache):
+                    # 缓存有效，直接返回缓存数据
                     cached_videos = self._ensure_video_ids(cache.get("videos", []))
                     if not search and not directory:
                         return cached_videos
@@ -489,6 +492,26 @@ class VideoServer:
                         if (not directory or video.get("base_dir") == directory)
                         and (not normalized_search or normalized_search in video.get("name", "").lower())
                     ]
+                else:
+                    # 缓存失效：检查是否存在过期缓存数据
+                    stale_videos = cache.get("videos", [])
+                    if stale_videos:
+                        # 存在过期缓存，立即返回过期数据并触发后台扫描
+                        self.ensure_background_scan()
+                        stale_videos = self._ensure_video_ids(stale_videos)
+                        if not search and not directory:
+                            return stale_videos
+                        normalized_search = search.lower()
+                        return [
+                            video
+                            for video in stale_videos
+                            if (not directory or video.get("base_dir") == directory)
+                            and (not normalized_search or normalized_search in video.get("name", "").lower())
+                        ]
+                    else:
+                        # 不存在任何缓存数据，触发后台扫描并返回空列表
+                        self.ensure_background_scan()
+                        return []
 
         videos = []
         for base_dir in dirs_to_scan:
@@ -508,6 +531,9 @@ class VideoServer:
                         continue
                     try:
                         stat = os.stat(full_path)
+                        # 跳过 0 字节文件（下载失败残留、写入中断等）
+                        if stat.st_size == 0:
+                            continue
                         rel_path = os.path.relpath(full_path, base_dir)
                         parent_dir = os.path.dirname(rel_path)
                         videos.append(
