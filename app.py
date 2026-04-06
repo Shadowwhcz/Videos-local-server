@@ -1132,9 +1132,72 @@ async def stream_video(video_id: str, request: Request):
 
     # 根据容器格式决定 MIME 类型
     container_format = detect_container_format(video_path)
+
+    # TS 格式视频：使用 ffmpeg 实时 remux 成 fMP4 输出，浏览器原生即可播放
     if container_format == 'mpegts':
-        mime_type = 'video/mp2t'
-    elif container_format == 'mp4':
+        mime_type = 'video/mp4'
+        etag = f'"{stat.st_mtime}-{stat.st_size}-remux"'
+        video_name = os.path.basename(video_path)
+
+        # HEAD 请求
+        if request.method == 'HEAD':
+            record_monitor_event("stream_head", request=request, video_id=video_id, video_name=video_name, file_size=file_size)
+            return Response(status_code=200, headers={
+                'Content-Type': mime_type,
+                'ETag': etag,
+                'Cache-Control': 'public, max-age=31536000',
+                'X-Content-Type-Options': 'nosniff',
+            })
+
+        # TS remux 不支持 Range 请求（ffmpeg 流式输出无法 seek），返回完整流
+        def iterfile_remux():
+            """使用 ffmpeg 将 TS 实时 remux 为 fMP4 流输出（只改容器不重编码）"""
+            import subprocess as sp
+            proc = None
+            try:
+                cmd = [
+                    'ffmpeg', '-i', video_path,
+                    '-c', 'copy',           # 不重编码，只改容器
+                    '-movflags', 'frag_keyframe+empty_moov+faststart',  # fMP4 流式输出
+                    '-f', 'mp4',
+                    '-v', 'error',
+                    'pipe:1'                # 输出到 stdout
+                ]
+                proc = sp.Popen(cmd, stdout=sp.PIPE, stderr=sp.PIPE)
+                chunk_size = STREAM_CHUNK_SIZE
+                while True:
+                    data = proc.stdout.read(chunk_size)
+                    if not data:
+                        break
+                    yield data
+            except Exception as e:
+                record_monitor_event("stream_remux_error", level="error", request=request,
+                                     video_id=video_id, video_name=video_name, detail=str(e))
+            finally:
+                if proc:
+                    try:
+                        proc.stdout.close()
+                        proc.terminate()
+                        proc.wait(timeout=5)
+                    except:
+                        pass
+
+        record_monitor_event("stream_remux_response", request=request, video_id=video_id,
+                             video_name=video_name, file_size=file_size, container_format='mpegts')
+
+        return StreamingResponse(
+            iterfile_remux(),
+            media_type=mime_type,
+            headers={
+                'Content-Type': mime_type,
+                'ETag': etag,
+                'Cache-Control': 'no-cache',  # remux 流不缓存
+                'X-Content-Type-Options': 'nosniff',
+            }
+        )
+
+    # 非 TS 格式：走原有逻辑
+    if container_format == 'mp4':
         mime_type = 'video/mp4'
     else:
         mime_type = get_mime_type(video_path)

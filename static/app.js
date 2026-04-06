@@ -555,11 +555,7 @@ function initPlayer() {
     // 检测容器格式，决定播放策略
     const containerFormat = video.dataset.containerFormat;
 
-    if (containerFormat === 'mpegts' && typeof mpegts !== 'undefined' && mpegts.isSupported()) {
-        // 使用 mpegts.js 播放 TS 格式视频
-        initTSPlayer(video);
-    }
-    // 否则保持原生播放（现有逻辑不变）
+    // TS 格式视频已在后端 remux 为 fMP4，浏览器原生播放即可，无需 mpegts.js
 
     const updatePlayerMetadata = () => {
         if (video.duration && Number.isFinite(video.duration) && video.duration > 0) {
@@ -570,15 +566,12 @@ function initPlayer() {
             localStorage.setItem(`video_duration_${video.dataset.videoId}`, formattedDuration);
             localStorage.setItem(`video_duration_seconds_${video.dataset.videoId}`, video.duration);
             localStorage.setItem(`video_duration_${video.dataset.videoId}_time`, Date.now().toString());
-        } else if (containerFormat === 'mpegts' && video.dataset.duration) {
-            // TS 格式 duration 可能为 Infinity，使用后端提供的准确值
+        } else if (video.dataset.duration) {
+            // 后端提供的 duration 作为备用
             const knownDur = parseFloat(video.dataset.duration);
             if (knownDur > 0) {
                 const formattedDuration = formatDuration(knownDur);
                 durationTargets.forEach(el => { el.textContent = formattedDuration; });
-                localStorage.setItem(`video_duration_${video.dataset.videoId}`, formattedDuration);
-                localStorage.setItem(`video_duration_seconds_${video.dataset.videoId}`, knownDur);
-                localStorage.setItem(`video_duration_${video.dataset.videoId}_time`, Date.now().toString());
             }
         }
 
