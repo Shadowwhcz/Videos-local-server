@@ -751,7 +751,14 @@ function initTSPlayer(video) {
 
     mpegtsPlayer = mpegts.createPlayer(mediaDataSource, {
         enableRangeSeek: true,
-        seekType: 'range'
+        seekType: 'range',
+        // 预加载配置：提前缓冲足够数据避免播放卡顿
+        lazyLoad: true,
+        lazyLoadMaxDuration: 600,       // 最多预加载 600 秒
+        lazyLoadRecoverDuration: 120,   // 缓冲低于 120 秒时恢复加载
+        autoCleanupSourceBuffer: true,
+        autoCleanupMaxBackwardDuration: 300,
+        autoCleanupMinBackwardDuration: 120
     });
     mpegtsPlayer.attachMediaElement(video);
     mpegtsPlayer.load();
