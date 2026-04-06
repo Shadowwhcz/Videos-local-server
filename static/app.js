@@ -738,26 +738,46 @@ function initTSPlayer(video) {
 
     mpegtsPlayer = mpegts.createPlayer({
         type: 'mpegts',
-        url: `/stream/${video.dataset.videoId}`,
-        duration: knownDuration > 0 ? knownDuration : undefined
+        isLive: false,
+        url: `/stream/${video.dataset.videoId}`
+    }, {
+        // 启用 Range seek，让进度条拖动生效
+        enableRangeSeek: true,
+        // 延迟加载，避免一次性请求整个文件
+        lazyLoad: true,
+        lazyLoadMaxDuration: 300,
+        lazyLoadRecoverDuration: 30
     });
     mpegtsPlayer.attachMediaElement(video);
     mpegtsPlayer.load();
 
+    // 当 mpegts.js 获取到媒体信息后，修正 MediaSource 的 duration
+    mpegtsPlayer.on(mpegts.Events.MEDIA_INFO, () => {
+        if (knownDuration > 0) {
+            // 延迟执行，等 MediaSource sourceBuffers 就绪
+            setTimeout(() => {
+                try {
+                    const ms = video.ms || video.mediaSource;
+                    if (ms && ms.readyState === 'open') {
+                        ms.duration = knownDuration;
+                        return;
+                    }
+                } catch (e) {}
+                // 备用方案：通过 mpegts.js 内部的 _msController 访问 MediaSource
+                try {
+                    const msCtrl = mpegtsPlayer._transmuxer?._controller?._msController;
+                    const ms2 = msCtrl?._mediaSource;
+                    if (ms2 && ms2.readyState === 'open') {
+                        ms2.duration = knownDuration;
+                    }
+                } catch (e) {}
+            }, 500);
+        }
+    });
+
     // 恢复 localStorage 中保存的播放位置
     const savedPosition = localStorage.getItem(`video_pos_${video.dataset.videoId}`);
     video.addEventListener('loadedmetadata', function onMeta() {
-        // TS 格式的 video.duration 可能为 Infinity，用后端的准确值修正
-        if (knownDuration > 0 && (!Number.isFinite(video.duration) || video.duration <= 0)) {
-            // 通过 MediaSource 的 duration 属性修正
-            try {
-                if (video.mediaSource && video.mediaSource.duration !== knownDuration) {
-                    video.mediaSource.duration = knownDuration;
-                }
-            } catch (e) {
-                // 静默失败
-            }
-        }
         if (savedPosition) {
             video.currentTime = parseFloat(savedPosition);
         }
@@ -765,10 +785,9 @@ function initTSPlayer(video) {
         video.removeEventListener('loadedmetadata', onMeta);
     });
 
-    // 持续监听：当 duration 变为有效值或需要修正时更新 UI
+    // 立即用后端 duration 更新 UI，不等浏览器解析
     const durationTargets = document.querySelectorAll('.js-player-duration');
     if (knownDuration > 0) {
-        // 立即用后端 duration 更新 UI，不等浏览器解析
         const formatted = formatDuration(knownDuration);
         durationTargets.forEach(el => { el.textContent = formatted; });
         localStorage.setItem(`video_duration_${video.dataset.videoId}`, formatted);
