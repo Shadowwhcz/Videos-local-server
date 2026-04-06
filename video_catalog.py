@@ -3,6 +3,7 @@ from __future__ import annotations
 import configparser
 import hashlib
 import json
+import logging
 import mimetypes
 import os
 import pickle
@@ -30,6 +31,37 @@ def get_video_id(video_path: str) -> str:
 def get_mime_type(file_path: str) -> str:
     mime_type, _ = mimetypes.guess_type(file_path)
     return mime_type or "application/octet-stream"
+
+
+logger = logging.getLogger(__name__)
+
+
+def detect_container_format(file_path: str) -> str:
+    """
+    读取文件头 8 字节，判断容器格式。
+    返回 'mpegts' | 'mp4' | 'unknown'
+    """
+    try:
+        with open(file_path, "rb") as f:
+            header = f.read(8)
+    except (OSError, IOError) as e:
+        # 文件不存在或读取失败，记录警告并返回 unknown
+        logger.warning("无法读取文件头: %s, 错误: %s", file_path, e)
+        return "unknown"
+
+    if not header:
+        # 空文件
+        return "unknown"
+
+    # 第一个字节为 0x47 → MPEG-TS sync byte
+    if header[0] == 0x47:
+        return "mpegts"
+
+    # 前 8 字节中包含 b'ftyp' → MP4 (ISO BMFF)
+    if b"ftyp" in header:
+        return "mp4"
+
+    return "unknown"
 
 
 class VideoServer:

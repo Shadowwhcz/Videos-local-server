@@ -35,9 +35,20 @@
             </div>
 
             <div class="player-stage-media">
+                {% if zero_byte_error %}
+                <div class="player-wrapper zero-byte-error-wrapper" style="display:flex;align-items:center;justify-content:center;flex-direction:column;min-height:320px;background:rgba(255,60,60,0.06);border:1px solid rgba(255,60,60,0.18);border-radius:16px;gap:12px;">
+                    <i class="bi bi-exclamation-triangle" style="font-size:3rem;color:#ff4d4f;"></i>
+                    <p style="font-size:1.15rem;color:#ff4d4f;font-weight:600;margin:0;">视频文件为空（0 字节），无法播放</p>
+                    <p style="font-size:0.9rem;color:rgba(255,255,255,0.5);margin:0;">该文件可能是下载失败的残留文件、写入中断或占位符文件。</p>
+                    <a href="{{ player_back_href }}" style="margin-top:8px;color:#00e5ff;text-decoration:none;font-size:0.95rem;">
+                        <i class="bi bi-arrow-left"></i> {{ player_back_label }}
+                    </a>
+                </div>
+                {% else %}
                 <div class="player-wrapper" id="playerWrapper">
                     <video id="videoPlayer"
                            data-video-id="{{ video.id }}"
+                           data-container-format="{{ container_format }}"
                            controls
                            autoplay
                            playsinline
@@ -53,6 +64,7 @@
                         <i class="bi bi-arrows-fullscreen"></i>
                     </button>
                 </div>
+                {% endif %}
             </div>
 
             <div class="player-stage-footer">
@@ -154,6 +166,7 @@
         </aside>
     </main>
 
+    <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1/dist/mpegts.min.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

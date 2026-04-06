@@ -27,7 +27,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
 from session_store import SessionManager
-from video_catalog import VideoServer, get_mime_type
+from video_catalog import VideoServer, get_mime_type, detect_container_format
 from video_health import (
     background_check_videos,
     check_single_video_integrity,
@@ -1005,11 +1005,15 @@ async def play(request: Request, video_id: str):
         library_browse_href = f"/?{urlencode(browse_params)}"
     player_back_label = "返回目录" if browse_path else "返回片库"
     
+    # 检测容器格式，传入模板上下文
+    container_format = detect_container_format(video["path"])
+
     return templates.TemplateResponse(
         request,
         "play.html",
         {
             "video": video,
+            "container_format": container_format,
             "next_up_videos": next_up_videos,
             "next_up_context_label": next_up_context_label,
             "current_user": get_actor_name(request),
@@ -1120,7 +1124,14 @@ async def stream_video(video_id: str, request: Request):
         )
         raise HTTPException(status_code=422, detail="视频文件为空，无法播放")
 
-    mime_type = get_mime_type(video_path)
+    # 根据容器格式决定 MIME 类型
+    container_format = detect_container_format(video_path)
+    if container_format == 'mpegts':
+        mime_type = 'video/mp2t'
+    elif container_format == 'mp4':
+        mime_type = 'video/mp4'
+    else:
+        mime_type = get_mime_type(video_path)
     etag = f'"{stat.st_mtime}-{stat.st_size}"'
     video_name = os.path.basename(video_path)
     
@@ -1358,6 +1369,10 @@ async def api_video_info(video_id: str):
         info['size'] = stat.st_size
         info['size_mb'] = round(stat.st_size / (1024 * 1024), 1)
         info['modified'] = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
+
+    # 检测容器格式并写入返回信息
+    container_format = detect_container_format(video_path)
+    info['container_format'] = container_format
 
     record_monitor_event(
         "video_info_resolved",

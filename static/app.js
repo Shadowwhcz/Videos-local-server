@@ -18,6 +18,9 @@ const STATUS_BATCH_SIZE = 20;   // 状态检查批量大小
 const DURATION_BATCH_SIZE = 10; // 时长获取批量大小
 const PLAYER_MONITOR_DEDUP_MS = 4000;
 
+// mpegts.js 播放器实例，用于资源清理
+let mpegtsPlayer = null;
+
 // 请求队列管理
 class RequestQueue {
     constructor(maxConcurrent = MAX_CONCURRENT) {
@@ -549,6 +552,15 @@ function initPlayer() {
     
     if (!video) return;
 
+    // 检测容器格式，决定播放策略
+    const containerFormat = video.dataset.containerFormat;
+
+    if (containerFormat === 'mpegts' && typeof mpegts !== 'undefined' && mpegts.isSupported()) {
+        // 使用 mpegts.js 播放 TS 格式视频
+        initTSPlayer(video);
+    }
+    // 否则保持原生播放（现有逻辑不变）
+
     const updatePlayerMetadata = () => {
         if (video.duration && Number.isFinite(video.duration)) {
             const formattedDuration = formatDuration(video.duration);
@@ -702,6 +714,40 @@ function initPlayer() {
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     document.addEventListener('mozfullscreenchange', handleFullscreenChange);
     document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+}
+
+/**
+ * 初始化 TS 格式播放器（使用 mpegts.js）
+ */
+function initTSPlayer(video) {
+    // 移除原生 source 标签，避免与 mpegts.js 冲突
+    video.querySelectorAll('source').forEach(s => s.remove());
+
+    mpegtsPlayer = mpegts.createPlayer({
+        type: 'mpegts',
+        url: `/stream/${video.dataset.videoId}`
+    });
+    mpegtsPlayer.attachMediaElement(video);
+    mpegtsPlayer.load();
+
+    // 恢复 localStorage 中保存的播放位置
+    const savedPosition = localStorage.getItem(`video_pos_${video.dataset.videoId}`);
+    video.addEventListener('loadedmetadata', function onMeta() {
+        if (savedPosition) {
+            video.currentTime = parseFloat(savedPosition);
+        }
+        video.play().catch(() => {});
+        video.removeEventListener('loadedmetadata', onMeta);
+    });
+
+    // 监听 mpegts.js 错误并上报
+    mpegtsPlayer.on(mpegts.Events.ERROR, (errorType, errorDetail, errorInfo) => {
+        sendPlayerMonitorEvent(video, 'mpegts_error', {
+            error_type: errorType,
+            error_detail: errorDetail,
+            error_info: errorInfo
+        }, 'error', 0);
+    });
 }
 
 /**
@@ -1371,5 +1417,19 @@ function initIntegrityCheck() {
     }
 }
 
-// 页面卸载时停止轮询
-window.addEventListener('beforeunload', stopPolling);
+// 页面卸载时清理资源
+window.addEventListener('beforeunload', function() {
+    // 清理 mpegts.js 播放器资源
+    try {
+        if (mpegtsPlayer) {
+            mpegtsPlayer.detachMediaElement();
+            mpegtsPlayer.destroy();
+            mpegtsPlayer = null;
+        }
+    } catch (e) {
+        // 静默失败，避免阻塞页面卸载
+    }
+
+    // 停止轮询
+    stopPolling();
+});
