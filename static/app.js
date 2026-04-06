@@ -733,47 +733,28 @@ function initTSPlayer(video) {
     // 移除原生 source 标签，避免与 mpegts.js 冲突
     video.querySelectorAll('source').forEach(s => s.remove());
 
-    // 从后端获取的准确 duration（ffprobe 解析），用于修正 TS 格式的进度条
-    const knownDuration = parseFloat(video.dataset.duration);
+    // 从后端获取的准确 duration 和 filesize（ffprobe 解析）
+    const knownDuration = parseFloat(video.dataset.duration) || 0;
+    const knownFilesize = parseInt(video.dataset.filesize) || 0;
 
-    mpegtsPlayer = mpegts.createPlayer({
+    // MediaDataSource 配置：filesize + duration 是 mpegts.js 正确处理 seek 和进度条的关键
+    const mediaDataSource = {
         type: 'mpegts',
         isLive: false,
-        url: `/stream/${video.dataset.videoId}`
-    }, {
-        // 启用 Range seek，让进度条拖动生效
+        url: `/stream/${video.dataset.videoId}`,
+        hasAudio: true,
+        hasVideo: true
+    };
+    // 只有当后端提供了有效值时才设置，避免 mpegts.js 用错误值计算
+    if (knownDuration > 0) mediaDataSource.duration = Math.round(knownDuration * 1000);  // mpegts.js 用毫秒
+    if (knownFilesize > 0) mediaDataSource.filesize = knownFilesize;
+
+    mpegtsPlayer = mpegts.createPlayer(mediaDataSource, {
         enableRangeSeek: true,
-        // 延迟加载，避免一次性请求整个文件
-        lazyLoad: true,
-        lazyLoadMaxDuration: 300,
-        lazyLoadRecoverDuration: 30
+        seekType: 'range'
     });
     mpegtsPlayer.attachMediaElement(video);
     mpegtsPlayer.load();
-
-    // 当 mpegts.js 获取到媒体信息后，修正 MediaSource 的 duration
-    mpegtsPlayer.on(mpegts.Events.MEDIA_INFO, () => {
-        if (knownDuration > 0) {
-            // 延迟执行，等 MediaSource sourceBuffers 就绪
-            setTimeout(() => {
-                try {
-                    const ms = video.ms || video.mediaSource;
-                    if (ms && ms.readyState === 'open') {
-                        ms.duration = knownDuration;
-                        return;
-                    }
-                } catch (e) {}
-                // 备用方案：通过 mpegts.js 内部的 _msController 访问 MediaSource
-                try {
-                    const msCtrl = mpegtsPlayer._transmuxer?._controller?._msController;
-                    const ms2 = msCtrl?._mediaSource;
-                    if (ms2 && ms2.readyState === 'open') {
-                        ms2.duration = knownDuration;
-                    }
-                } catch (e) {}
-            }, 500);
-        }
-    });
 
     // 恢复 localStorage 中保存的播放位置
     const savedPosition = localStorage.getItem(`video_pos_${video.dataset.videoId}`);
@@ -785,7 +766,7 @@ function initTSPlayer(video) {
         video.removeEventListener('loadedmetadata', onMeta);
     });
 
-    // 立即用后端 duration 更新 UI，不等浏览器解析
+    // 立即用后端 duration 更新 UI 文本，不等浏览器解析
     const durationTargets = document.querySelectorAll('.js-player-duration');
     if (knownDuration > 0) {
         const formatted = formatDuration(knownDuration);
