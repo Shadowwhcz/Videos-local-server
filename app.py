@@ -1158,6 +1158,7 @@ async def stream_video(video_id: str, request: Request):
                 cmd = [
                     'ffmpeg', '-i', video_path,
                     '-c', 'copy',           # 不重编码，只改容器
+                    '-bsf:a', 'aac_adtstoasc',  # TS 中的 AAC ADTS 格式转为 ASC（MP4 要求）
                     '-movflags', 'frag_keyframe+empty_moov+faststart',  # fMP4 流式输出
                     '-f', 'mp4',
                     '-v', 'error',
