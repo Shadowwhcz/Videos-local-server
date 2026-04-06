@@ -1008,6 +1008,12 @@ async def play(request: Request, video_id: str):
     # 检测容器格式，传入模板上下文
     container_format = detect_container_format(video["path"])
 
+    # 获取视频详细信息（包含 duration），用于 TS 格式的进度条修正
+    video_info = video_server.get_video_info(video["path"])
+    video["duration"] = video_info.get("duration")
+    video["duration_formatted"] = video_info.get("duration_formatted")
+    video["resolution"] = video_info.get("resolution")
+
     return templates.TemplateResponse(
         request,
         "play.html",

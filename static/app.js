@@ -562,7 +562,7 @@ function initPlayer() {
     // 否则保持原生播放（现有逻辑不变）
 
     const updatePlayerMetadata = () => {
-        if (video.duration && Number.isFinite(video.duration)) {
+        if (video.duration && Number.isFinite(video.duration) && video.duration > 0) {
             const formattedDuration = formatDuration(video.duration);
             durationTargets.forEach(el => {
                 el.textContent = formattedDuration;
@@ -570,6 +570,16 @@ function initPlayer() {
             localStorage.setItem(`video_duration_${video.dataset.videoId}`, formattedDuration);
             localStorage.setItem(`video_duration_seconds_${video.dataset.videoId}`, video.duration);
             localStorage.setItem(`video_duration_${video.dataset.videoId}_time`, Date.now().toString());
+        } else if (containerFormat === 'mpegts' && video.dataset.duration) {
+            // TS 格式 duration 可能为 Infinity，使用后端提供的准确值
+            const knownDur = parseFloat(video.dataset.duration);
+            if (knownDur > 0) {
+                const formattedDuration = formatDuration(knownDur);
+                durationTargets.forEach(el => { el.textContent = formattedDuration; });
+                localStorage.setItem(`video_duration_${video.dataset.videoId}`, formattedDuration);
+                localStorage.setItem(`video_duration_seconds_${video.dataset.videoId}`, knownDur);
+                localStorage.setItem(`video_duration_${video.dataset.videoId}_time`, Date.now().toString());
+            }
         }
 
         if (video.videoWidth && video.videoHeight) {
@@ -723,9 +733,13 @@ function initTSPlayer(video) {
     // 移除原生 source 标签，避免与 mpegts.js 冲突
     video.querySelectorAll('source').forEach(s => s.remove());
 
+    // 从后端获取的准确 duration（ffprobe 解析），用于修正 TS 格式的进度条
+    const knownDuration = parseFloat(video.dataset.duration);
+
     mpegtsPlayer = mpegts.createPlayer({
         type: 'mpegts',
-        url: `/stream/${video.dataset.videoId}`
+        url: `/stream/${video.dataset.videoId}`,
+        duration: knownDuration > 0 ? knownDuration : undefined
     });
     mpegtsPlayer.attachMediaElement(video);
     mpegtsPlayer.load();
@@ -733,12 +747,34 @@ function initTSPlayer(video) {
     // 恢复 localStorage 中保存的播放位置
     const savedPosition = localStorage.getItem(`video_pos_${video.dataset.videoId}`);
     video.addEventListener('loadedmetadata', function onMeta() {
+        // TS 格式的 video.duration 可能为 Infinity，用后端的准确值修正
+        if (knownDuration > 0 && (!Number.isFinite(video.duration) || video.duration <= 0)) {
+            // 通过 MediaSource 的 duration 属性修正
+            try {
+                if (video.mediaSource && video.mediaSource.duration !== knownDuration) {
+                    video.mediaSource.duration = knownDuration;
+                }
+            } catch (e) {
+                // 静默失败
+            }
+        }
         if (savedPosition) {
             video.currentTime = parseFloat(savedPosition);
         }
         video.play().catch(() => {});
         video.removeEventListener('loadedmetadata', onMeta);
     });
+
+    // 持续监听：当 duration 变为有效值或需要修正时更新 UI
+    const durationTargets = document.querySelectorAll('.js-player-duration');
+    if (knownDuration > 0) {
+        // 立即用后端 duration 更新 UI，不等浏览器解析
+        const formatted = formatDuration(knownDuration);
+        durationTargets.forEach(el => { el.textContent = formatted; });
+        localStorage.setItem(`video_duration_${video.dataset.videoId}`, formatted);
+        localStorage.setItem(`video_duration_seconds_${video.dataset.videoId}`, knownDuration);
+        localStorage.setItem(`video_duration_${video.dataset.videoId}_time`, Date.now().toString());
+    }
 
     // 监听 mpegts.js 错误并上报
     mpegtsPlayer.on(mpegts.Events.ERROR, (errorType, errorDetail, errorInfo) => {
