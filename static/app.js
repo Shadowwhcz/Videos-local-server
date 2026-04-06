@@ -746,7 +746,7 @@ function initTSPlayer(video) {
         hasVideo: true
     };
     // 只有当后端提供了有效值时才设置，避免 mpegts.js 用错误值计算
-    if (knownDuration > 0) mediaDataSource.duration = Math.round(knownDuration * 1000);  // mpegts.js 用毫秒
+    if (knownDuration > 0) mediaDataSource.duration = knownDuration;  // mpegts.js 用秒
     if (knownFilesize > 0) mediaDataSource.filesize = knownFilesize;
 
     mpegtsPlayer = mpegts.createPlayer(mediaDataSource, {
